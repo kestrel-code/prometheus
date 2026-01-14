@@ -830,7 +830,7 @@ func (*Encoder) samplesV2(samples []RefSample, b []byte) []byte {
 	buf.PutVarint64(int64(first.Ref))
 	buf.PutVarint64(first.T)
 	if first.ST == 0 {
-		buf.PutByte(0)
+		buf.PutByte(noST)
 	} else {
 		buf.PutByte(explicitST)
 		buf.PutVarint64(first.T - first.ST)
@@ -849,7 +849,7 @@ func (*Encoder) samplesV2(samples []RefSample, b []byte) []byte {
 
 		switch s.ST {
 		case 0:
-			buf.PutByte(0)
+			buf.PutByte(noST)
 		case prev.ST:
 			buf.PutByte(sameST)
 		default:

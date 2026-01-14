@@ -21,6 +21,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// Type represents the compression type used for encoding and decoding data.
 type Type string
 
 const (
@@ -33,10 +34,17 @@ const (
 	Zstd Type = "zstd"
 )
 
+// Encoder provides compression encoding functionality for supported compression
+// types. It is agnostic to the content being compressed, operating on byte
+// slices of serialized data streams. The encoder maintains internal state for
+// Zstd compression and can handle multiple compression types including None,
+// Snappy, and Zstd.
 type Encoder struct {
 	w *zstd.Encoder
 }
 
+// NewEncoder creates a new Encoder. Returns an error if the zstd encoder cannot
+// be initialized.
 func NewEncoder() (*Encoder, error) {
 	e := &Encoder{}
 	w, err := zstd.NewWriter(nil)
@@ -80,10 +88,16 @@ func (e *Encoder) Encode(t Type, src, buf []byte) (_ []byte, compressed bool, er
 	}
 }
 
+// Decoder provides decompression functionality for supported compression types.
+// It is agnostic to the content being decompressed, operating on byte slices of
+// serialized data streams. The decoder maintains internal state for Zstd
+// decompression and can handle multiple compression types including None,
+// Snappy, and Zstd.
 type Decoder struct {
 	r *zstd.Decoder
 }
 
+// NewDecoder creates a new Decoder.
 func NewDecoder() *Decoder {
 	d := &Decoder{}
 
