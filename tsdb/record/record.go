@@ -373,31 +373,30 @@ func (*Decoder) samplesV2(dec *encoding.Decbuf, samples []RefSample) ([]RefSampl
 	if minSize := dec.Len() / (1 + 1 + 8); cap(samples) < minSize {
 		samples = make([]RefSample, 0, minSize)
 	}
-	var firstT int64
+	var firstT, firstST int64
 	for len(dec.B) > 0 && dec.Err() == nil {
 		var prev RefSample
-		var ref, t int64
+		var ref, t, ST int64
 		var val uint64
 
 		if len(samples) == 0 {
 			ref = dec.Varint64()
 			firstT = dec.Varint64()
 			t = firstT
+			ST = dec.Varint64()
+			firstST = ST
 		} else {
 			prev = samples[len(samples)-1]
 			ref = int64(prev.Ref) + dec.Varint64()
 			t = firstT + dec.Varint64()
-		}
-
-		stMarker := dec.Byte()
-		var ST int64
-		switch stMarker {
-		case noST:
-		case sameST:
-			ST = prev.ST
-		default:
-			v := dec.Varint64()
-			ST = firstT - v
+			stMarker := dec.Byte()
+			switch stMarker {
+			case noST:
+			case sameST:
+				ST = prev.ST
+			default:
+				ST = firstST + dec.Varint64()
+			}
 		}
 
 		val = dec.Be64()
@@ -829,12 +828,7 @@ func (*Encoder) samplesV2(samples []RefSample, b []byte) []byte {
 	first := samples[0]
 	buf.PutVarint64(int64(first.Ref))
 	buf.PutVarint64(first.T)
-	if first.ST == 0 {
-		buf.PutByte(noST)
-	} else {
-		buf.PutByte(explicitST)
-		buf.PutVarint64(first.T - first.ST)
-	}
+	buf.PutVarint64(first.ST)
 	buf.PutBE64(math.Float64bits(first.V))
 
 	// Subsequent values are delta to the immediate previous values, and in the
@@ -854,7 +848,7 @@ func (*Encoder) samplesV2(samples []RefSample, b []byte) []byte {
 			buf.PutByte(sameST)
 		default:
 			buf.PutByte(explicitST)
-			buf.PutVarint64(first.T - s.ST)
+			buf.PutVarint64(s.ST - first.ST)
 		}
 		buf.PutBE64(math.Float64bits(s.V))
 	}

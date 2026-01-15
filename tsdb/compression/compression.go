@@ -61,8 +61,6 @@ func NewEncoder() (*Encoder, error) {
 //
 // The buf is used as a buffer for returned encoding, and it must not overlap with
 // src. It is valid to pass a nil buf.
-//
-// Encoder may be nil compression types other than Zstd.
 func (e *Encoder) Encode(t Type, src, buf []byte) (_ []byte, compressed bool, err error) {
 	switch {
 	case len(src) == 0, t == "", t == None:
@@ -111,8 +109,6 @@ func NewDecoder() *Decoder {
 //
 // The buf is used as a buffer for the returned decoded entry, and it must not
 // overlap with src. It is valid to pass a nil buf.
-//
-// Decoder may be nil compression types other than Zstd.
 func (d *Decoder) Decode(t Type, src, buf []byte) (_ []byte, err error) {
 	switch {
 	case len(src) == 0, t == "", t == None:

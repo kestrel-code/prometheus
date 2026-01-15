@@ -90,13 +90,29 @@ func TestDB_InvalidSeries_AppendV2(t *testing.T) {
 }
 
 func TestCommit_AppendV2(t *testing.T) {
+	testCommit_AppendV2(t, false)
+	testCommit_AppendV2(t, true)
+}
+
+func makeST(i int, stStorage bool) int64 {
+	if !stStorage {
+		return 0
+	}
+	return int64(i)
+}
+
+func testCommit_AppendV2(t *testing.T, stStorage bool) {
 	const (
 		numDatapoints = 1000
 		numHistograms = 100
 		numSeries     = 8
 	)
+	opts := DefaultOptions()
+	if stStorage {
+		opts.EnableSTStorage = true
+	}
+	s := createTestAgentDB(t, nil, opts)
 
-	s := createTestAgentDB(t, nil, DefaultOptions())
 	app := s.AppenderV2(context.TODO())
 
 	lbls := labelsForTest(t.Name(), numSeries)
@@ -105,10 +121,10 @@ func TestCommit_AppendV2(t *testing.T) {
 
 		for i := range numDatapoints {
 			sample := chunks.GenerateSamples(0, 1)
-			_, err := app.Append(0, lset, 0, sample[0].T(), sample[0].F(), nil, nil, storage.AOptions{
+			_, err := app.Append(0, lset, makeST(i, stStorage), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{
 				Exemplars: []exemplar.Exemplar{{
 					Labels: lset,
-					Ts:     sample[0].T() + int64(i),
+					Ts:     sample[0].T() + int64(i) + 2000,
 					Value:  sample[0].F(),
 					HasTs:  true,
 				}},
@@ -124,7 +140,7 @@ func TestCommit_AppendV2(t *testing.T) {
 		histograms := tsdbutil.GenerateTestHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -136,7 +152,7 @@ func TestCommit_AppendV2(t *testing.T) {
 		customBucketHistograms := tsdbutil.GenerateTestCustomBucketsHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, customBucketHistograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, customBucketHistograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -148,7 +164,7 @@ func TestCommit_AppendV2(t *testing.T) {
 		floatHistograms := tsdbutil.GenerateTestFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -160,7 +176,7 @@ func TestCommit_AppendV2(t *testing.T) {
 		customBucketFloatHistograms := tsdbutil.GenerateTestCustomBucketsFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, nil, customBucketFloatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, customBucketFloatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -227,22 +243,31 @@ func TestCommit_AppendV2(t *testing.T) {
 }
 
 func TestRollback_AppendV2(t *testing.T) {
+	testRollback_AppendV2(t, false)
+	testRollback_AppendV2(t, true)
+}
+
+func testRollback_AppendV2(t *testing.T, stStorage bool) {
 	const (
 		numDatapoints = 1000
 		numHistograms = 100
 		numSeries     = 8
 	)
 
-	s := createTestAgentDB(t, nil, DefaultOptions())
+	opts := DefaultOptions()
+	if stStorage {
+		opts.EnableSTStorage = true
+	}
+	s := createTestAgentDB(t, nil, opts)
 	app := s.AppenderV2(context.TODO())
 
 	lbls := labelsForTest(t.Name(), numSeries)
 	for _, l := range lbls {
 		lset := labels.New(l...)
 
-		for range numDatapoints {
+		for i := range numDatapoints {
 			sample := chunks.GenerateSamples(0, 1)
-			_, err := app.Append(0, lset, 0, sample[0].T(), sample[0].F(), nil, nil, storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -254,7 +279,7 @@ func TestRollback_AppendV2(t *testing.T) {
 		histograms := tsdbutil.GenerateTestHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -266,7 +291,7 @@ func TestRollback_AppendV2(t *testing.T) {
 		histograms := tsdbutil.GenerateTestCustomBucketsHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -278,7 +303,7 @@ func TestRollback_AppendV2(t *testing.T) {
 		floatHistograms := tsdbutil.GenerateTestFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -290,7 +315,7 @@ func TestRollback_AppendV2(t *testing.T) {
 		floatHistograms := tsdbutil.GenerateTestCustomBucketsFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, 0, int64(i), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -312,7 +337,7 @@ func TestRollback_AppendV2(t *testing.T) {
 		r   = wlog.NewReader(sr)
 		dec = record.NewDecoder(labels.NewSymbolTable(), promslog.NewNopLogger())
 
-		walSeriesCount, walSamplesCount, walHistogramCount, walFloatHistogramCount, walExemplarsCount int
+		walSeriesCount int
 	)
 	for r.Next() {
 		rec := r.Record()
@@ -324,28 +349,13 @@ func TestRollback_AppendV2(t *testing.T) {
 			walSeriesCount += len(series)
 
 		case record.Samples, record.SamplesV2:
-			var samples []record.RefSample
-			samples, err = dec.Samples(rec, samples)
-			require.NoError(t, err)
-			walSamplesCount += len(samples)
+			t.Errorf("should not have found samples")
 
 		case record.Exemplars:
-			var exemplars []record.RefExemplar
-			exemplars, err = dec.Exemplars(rec, exemplars)
-			require.NoError(t, err)
-			walExemplarsCount += len(exemplars)
+			t.Errorf("should not have found exemplars")
 
-		case record.HistogramSamples, record.CustomBucketsHistogramSamples:
-			var histograms []record.RefHistogramSample
-			histograms, err = dec.HistogramSamples(rec, histograms)
-			require.NoError(t, err)
-			walHistogramCount += len(histograms)
-
-		case record.FloatHistogramSamples, record.CustomBucketsFloatHistogramSamples:
-			var floatHistograms []record.RefFloatHistogramSample
-			floatHistograms, err = dec.FloatHistogramSamples(rec, floatHistograms)
-			require.NoError(t, err)
-			walFloatHistogramCount += len(floatHistograms)
+		case record.HistogramSamples, record.CustomBucketsHistogramSamples, record.FloatHistogramSamples, record.CustomBucketsFloatHistogramSamples:
+			t.Errorf("should not have found histograms")
 
 		default:
 		}
@@ -353,10 +363,6 @@ func TestRollback_AppendV2(t *testing.T) {
 
 	// Check that only series get stored after calling Rollback.
 	require.Equal(t, numSeries*5, walSeriesCount, "series should have been written to WAL")
-	require.Equal(t, 0, walSamplesCount, "samples should not have been written to WAL")
-	require.Equal(t, 0, walExemplarsCount, "exemplars should not have been written to WAL")
-	require.Equal(t, 0, walHistogramCount, "histograms should not have been written to WAL")
-	require.Equal(t, 0, walFloatHistogramCount, "float histograms should not have been written to WAL")
 }
 
 func TestFullTruncateWAL_AppendV2(t *testing.T) {
