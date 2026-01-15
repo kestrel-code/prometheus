@@ -90,8 +90,8 @@ func TestDB_InvalidSeries_AppendV2(t *testing.T) {
 }
 
 func TestCommit_AppendV2(t *testing.T) {
-	testCommit_AppendV2(t, false)
-	testCommit_AppendV2(t, true)
+	testCommitAppendV2(t, false)
+	testCommitAppendV2(t, true)
 }
 
 func makeST(i int, stStorage bool) int64 {
@@ -101,7 +101,7 @@ func makeST(i int, stStorage bool) int64 {
 	return int64(i)
 }
 
-func testCommit_AppendV2(t *testing.T, stStorage bool) {
+func testCommitAppendV2(t *testing.T, stStorage bool) {
 	const (
 		numDatapoints = 1000
 		numHistograms = 100
@@ -243,11 +243,11 @@ func testCommit_AppendV2(t *testing.T, stStorage bool) {
 }
 
 func TestRollback_AppendV2(t *testing.T) {
-	testRollback_AppendV2(t, false)
-	testRollback_AppendV2(t, true)
+	testRollbackAppendV2(t, false)
+	testRollbackAppendV2(t, true)
 }
 
-func testRollback_AppendV2(t *testing.T, stStorage bool) {
+func testRollbackAppendV2(t *testing.T, stStorage bool) {
 	const (
 		numDatapoints = 1000
 		numHistograms = 100
