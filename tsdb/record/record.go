@@ -373,38 +373,30 @@ func (*Decoder) samplesV2(dec *encoding.Decbuf, samples []RefSample) ([]RefSampl
 	if minSize := dec.Len() / (1 + 1 + 8); cap(samples) < minSize {
 		samples = make([]RefSample, 0, minSize)
 	}
-	var (
-		firstT, firstST int64
-		prev RefSample
-		ref, t, ST int64
-		val uint64
-	)
-
-	ref = dec.Varint64()
-	firstT = dec.Varint64()
-	t = firstT
-	ST = dec.Varint64()
-	firstST = ST
-
-	val = dec.Be64()
-	samples = append(samples, RefSample{
-		Ref: chunks.HeadSeriesRef(ref),
-		ST:  ST,
-		T:   t,
-		V:   math.Float64frombits(val),
-	})
-
+	var firstT, firstST int64
 	for len(dec.B) > 0 && dec.Err() == nil {
-		prev = samples[len(samples)-1]
-		ref = int64(prev.Ref) + dec.Varint64()
-		t = firstT + dec.Varint64()
-		stMarker := dec.Byte()
-		switch stMarker {
-		case noST:
-		case sameST:
-			ST = prev.ST
-		default:
-			ST = firstST + dec.Varint64()
+		var prev RefSample
+		var ref, t, ST int64
+		var val uint64
+
+		if len(samples) == 0 {
+			ref = dec.Varint64()
+			firstT = dec.Varint64()
+			t = firstT
+			ST = dec.Varint64()
+			firstST = ST
+		} else {
+			prev = samples[len(samples)-1]
+			ref = int64(prev.Ref) + dec.Varint64()
+			t = firstT + dec.Varint64()
+			stMarker := dec.Byte()
+			switch stMarker {
+			case noST:
+			case sameST:
+				ST = prev.ST
+			default:
+				ST = firstST + dec.Varint64()
+			}
 		}
 
 		val = dec.Be64()

@@ -25,6 +25,20 @@ import (
 )
 
 func TestEncodeDecode(t *testing.T) {
+	testEncodeDecode(t, false)
+	testEncodeDecode(t, true)
+}
+
+func zeroOutSTs(samples []record.RefSample) []record.RefSample{
+	out := make([]record.RefSample, len(samples))
+	for i := range samples {
+		out[i] = samples[i]
+		out[i].ST = 0
+	}
+	return out
+}
+
+func testEncodeDecode(t *testing.T, enableSTStorage bool) {
 	for _, tcase := range []testrecord.RefSamplesCase{
 		testrecord.Realistic1000Samples,
 		testrecord.Realistic1000WithVariableSTSamples,
@@ -35,7 +49,7 @@ func TestEncodeDecode(t *testing.T) {
 		var (
 			dec record.Decoder
 			buf []byte
-			enc = record.Encoder{EnableSTStorage: true}
+			enc = record.Encoder{EnableSTStorage: enableSTStorage}
 		)
 
 		s := testrecord.GenTestRefSamplesCase(t, tcase)
@@ -43,7 +57,13 @@ func TestEncodeDecode(t *testing.T) {
 		{
 			got, err := dec.Samples(enc.Samples(s, nil), nil)
 			require.NoError(t, err)
-			require.Equal(t, s, got)
+			// if ST is off, we expect all STs to be zero
+			expected := s
+			if !enableSTStorage {
+				expected = zeroOutSTs(s)
+			}
+
+			require.Equal(t, expected, got)
 		}
 
 		//  With byte buffer (append!)
@@ -51,7 +71,12 @@ func TestEncodeDecode(t *testing.T) {
 			buf = make([]byte, 10, 1e5)
 			got, err := dec.Samples(enc.Samples(s, buf)[10:], nil)
 			require.NoError(t, err)
-			require.Equal(t, s, got)
+
+			expected := s
+			if !enableSTStorage {
+				expected = zeroOutSTs(s)
+			}
+			require.Equal(t, expected, got)
 		}
 
 		// With sample slice
@@ -59,7 +84,11 @@ func TestEncodeDecode(t *testing.T) {
 			samples := make([]record.RefSample, 0, len(s)+1)
 			got, err := dec.Samples(enc.Samples(s, nil), samples)
 			require.NoError(t, err)
-			require.Equal(t, s, got)
+			expected := s
+			if !enableSTStorage {
+				expected = zeroOutSTs(s)
+			}
+			require.Equal(t, expected, got)
 		}
 
 		// With compression.
@@ -76,7 +105,11 @@ func TestEncodeDecode(t *testing.T) {
 
 			got, err := dec.Samples(buf, nil)
 			require.NoError(t, err)
-			require.Equal(t, s, got)
+			expected := s
+			if !enableSTStorage {
+				expected = zeroOutSTs(s)
+			}
+			require.Equal(t, expected, got)
 		}
 	}
 }
