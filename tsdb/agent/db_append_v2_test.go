@@ -94,13 +94,6 @@ func TestCommit_AppendV2(t *testing.T) {
 	testCommitAppendV2(t, true)
 }
 
-func makeST(i int, stStorage bool) int64 {
-	if !stStorage {
-		return 0
-	}
-	return int64(i)
-}
-
 func testCommitAppendV2(t *testing.T, stStorage bool) {
 	const (
 		numDatapoints = 1000
@@ -108,9 +101,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 		numSeries     = 8
 	)
 	opts := DefaultOptions()
-	if stStorage {
-		opts.EnableSTStorage = true
-	}
+	opts.EnableSTStorage = stStorage
 	s := createTestAgentDB(t, nil, opts)
 
 	app := s.AppenderV2(context.TODO())
@@ -121,7 +112,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 
 		for i := range numDatapoints {
 			sample := chunks.GenerateSamples(0, 1)
-			_, err := app.Append(0, lset, makeST(i, stStorage), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{
+			_, err := app.Append(0, lset, int64(i), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{
 				Exemplars: []exemplar.Exemplar{{
 					Labels: lset,
 					Ts:     sample[0].T() + int64(i) + 2000,
@@ -140,7 +131,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 		histograms := tsdbutil.GenerateTestHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -152,7 +143,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 		customBucketHistograms := tsdbutil.GenerateTestCustomBucketsHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, customBucketHistograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, customBucketHistograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -164,7 +155,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 		floatHistograms := tsdbutil.GenerateTestFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -176,7 +167,7 @@ func testCommitAppendV2(t *testing.T, stStorage bool) {
 		customBucketFloatHistograms := tsdbutil.GenerateTestCustomBucketsFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, customBucketFloatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, nil, customBucketFloatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -267,7 +258,7 @@ func testRollbackAppendV2(t *testing.T, stStorage bool) {
 
 		for i := range numDatapoints {
 			sample := chunks.GenerateSamples(0, 1)
-			_, err := app.Append(0, lset, makeST(i, stStorage), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), sample[0].T()+2000, sample[0].F(), nil, nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -279,7 +270,7 @@ func testRollbackAppendV2(t *testing.T, stStorage bool) {
 		histograms := tsdbutil.GenerateTestHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -291,7 +282,7 @@ func testRollbackAppendV2(t *testing.T, stStorage bool) {
 		histograms := tsdbutil.GenerateTestCustomBucketsHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, histograms[i], nil, storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -303,7 +294,7 @@ func testRollbackAppendV2(t *testing.T, stStorage bool) {
 		floatHistograms := tsdbutil.GenerateTestFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
@@ -315,7 +306,7 @@ func testRollbackAppendV2(t *testing.T, stStorage bool) {
 		floatHistograms := tsdbutil.GenerateTestCustomBucketsFloatHistograms(numHistograms)
 
 		for i := range numHistograms {
-			_, err := app.Append(0, lset, makeST(i, stStorage), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
+			_, err := app.Append(0, lset, int64(i), int64(i+2000), 0, nil, floatHistograms[i], storage.AOptions{})
 			require.NoError(t, err)
 		}
 	}
