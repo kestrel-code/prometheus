@@ -29,7 +29,7 @@ func TestEncodeDecode(t *testing.T) {
 	testEncodeDecode(t, true)
 }
 
-func zeroOutSTs(samples []record.RefSample) []record.RefSample{
+func zeroOutSTs(samples []record.RefSample) []record.RefSample {
 	out := make([]record.RefSample, len(samples))
 	for i := range samples {
 		out[i] = samples[i]
