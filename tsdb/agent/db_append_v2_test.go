@@ -222,12 +222,18 @@ func TestCommitAppendV2(t *testing.T) {
 		}
 
 		// Check that the WAL contained the same number of committed series/samples/exemplars.
-		require.Equal(t, numSeries*5, walSeriesCount, "unexpected number of series")
-		require.Equal(t, numSeries*numDatapoints, walSamplesCount, "unexpected number of samples")
-		require.Equal(t, numSeries*numDatapoints, walExemplarsCount, "unexpected number of exemplars")
-		require.Equal(t, numSeries*numHistograms*2, walHistogramCount, "unexpected number of histograms")
-		require.Equal(t, numSeries*numHistograms*2, walFloatHistogramCount, "unexpected number of float histograms")
+	require.Equal(t, numSeries*5, walSeriesCount, "unexpected number of series")
+	require.Equal(t, numSeries*numDatapoints, walSamplesCount, "unexpected number of samples")
+	require.Equal(t, numSeries*numDatapoints, walExemplarsCount, "unexpected number of exemplars")
+	require.Equal(t, numSeries*numHistograms*2, walHistogramCount, "unexpected number of histograms")
+	require.Equal(t, numSeries*numHistograms*2, walFloatHistogramCount, "unexpected number of float histograms")
+
+	// Check that we can still create both kinds of Appender - see https://github.com/prometheus/prometheus/issues/17800.
+	_ = s.Appender(context.TODO())
+	_ = s.AppenderV2(context.TODO())
 	}
+
+	
 }
 
 func TestRollbackAppendV2(t *testing.T) {
