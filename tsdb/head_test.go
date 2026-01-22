@@ -705,7 +705,7 @@ func TestHead_ReadWAL(t *testing.T) {
 					},
 				}
 
-			head, w := newTestHead(t, 1000, compress, false)
+				head, w := newTestHead(t, 1000, compress, false)
 
 				populateTestWL(t, w, entries, nil, enableStStorage)
 
@@ -742,10 +742,10 @@ func TestHead_ReadWAL(t *testing.T) {
 					return x
 				}
 
-			// Verify samples and exemplar for series 10.
-			c, _, _, err := s10.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
-			require.NoError(t, err)
-			require.Equal(t, []sample{{0, 100, 2, nil, nil}, {0, 101, 5, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+				// Verify samples and exemplar for series 10.
+				c, _, _, err := s10.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
+				require.NoError(t, err)
+				require.Equal(t, []sample{{0, 100, 2, nil, nil}, {0, 101, 5, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
 				q, err := head.ExemplarQuerier(context.Background())
 				require.NoError(t, err)
@@ -755,17 +755,17 @@ func TestHead_ReadWAL(t *testing.T) {
 				require.NotEmpty(t, e[0].Exemplars)
 				require.True(t, exemplar.Exemplar{Ts: 100, Value: 1, Labels: labels.FromStrings("trace_id", "asdf")}.Equals(e[0].Exemplars[0]))
 
-			// Verify samples for series 50
-			c, _, _, err = s50.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
-			require.NoError(t, err)
-			require.Equal(t, []sample{{0, 101, 6, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+				// Verify samples for series 50
+				c, _, _, err = s50.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
+				require.NoError(t, err)
+				require.Equal(t, []sample{{0, 101, 6, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
-			// Verify records for series 100 and its duplicate, series 101.
-			// The samples before the new series record should be discarded since a duplicate record
-			// is only possible when old samples were compacted.
-			c, _, _, err = s100.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
-			require.NoError(t, err)
-			require.Equal(t, []sample{{0, 101, 7, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
+				// Verify records for series 100 and its duplicate, series 101.
+				// The samples before the new series record should be discarded since a duplicate record
+				// is only possible when old samples were compacted.
+				c, _, _, err = s100.chunk(0, head.chunkDiskMapper, &head.memChunkPool)
+				require.NoError(t, err)
+				require.Equal(t, []sample{{0, 101, 7, nil, nil}}, expandChunk(c.chunk.Iterator(nil)))
 
 				q, err = head.ExemplarQuerier(context.Background())
 				require.NoError(t, err)
@@ -1642,22 +1642,22 @@ func TestMemSeries_truncateChunks_scenarios(t *testing.T) {
 
 func TestHeadDeleteSeriesWithoutSamples(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
-	for _, compress := range []compression.Type{compression.None, compression.Snappy, compression.Zstd} {
-		t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
-			entries := []any{
-				[]record.RefSeries{
-					{Ref: 10, Labels: labels.FromStrings("a", "1")},
-				},
-				[]record.RefSample{},
-				[]record.RefSeries{
-					{Ref: 50, Labels: labels.FromStrings("a", "2")},
-				},
-				[]record.RefSample{
-					{Ref: 50, T: 80, V: 1},
-					{Ref: 50, T: 90, V: 1},
-				},
-			}
-			head, w := newTestHead(t, 1000, compress, false)
+		for _, compress := range []compression.Type{compression.None, compression.Snappy, compression.Zstd} {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
+				entries := []any{
+					[]record.RefSeries{
+						{Ref: 10, Labels: labels.FromStrings("a", "1")},
+					},
+					[]record.RefSample{},
+					[]record.RefSeries{
+						{Ref: 50, Labels: labels.FromStrings("a", "2")},
+					},
+					[]record.RefSample{
+						{Ref: 50, T: 80, V: 1},
+						{Ref: 50, T: 90, V: 1},
+					},
+				}
+				head, w := newTestHead(t, 1000, compress, false)
 
 				populateTestWL(t, w, entries, nil, enableStStorage)
 
@@ -2339,7 +2339,7 @@ func TestGCChunkAccess(t *testing.T) {
 
 	idx := h.indexRange(0, 1500)
 	var (
-		chnks  []chunks.Meta
+		chnks   []chunks.Meta
 		builder labels.ScratchBuilder
 	)
 	require.NoError(t, idx.Series(1, &builder, &chnks))
@@ -4430,22 +4430,22 @@ func TestChunkSnapshot(t *testing.T) {
 					lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
 					lblsFloatHistStr := lblsFloatHist.String()
 
-				// 240 samples should m-map at least 1 chunk.
-				for ts := int64(1); ts <= 240; ts++ {
-					val := rand.Float64()
-					expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
-					ref, err := app.Append(0, lbls, ts, val)
-					require.NoError(t, err)
+					// 240 samples should m-map at least 1 chunk.
+					for ts := int64(1); ts <= 240; ts++ {
+						val := rand.Float64()
+						expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
+						ref, err := app.Append(0, lbls, ts, val)
+						require.NoError(t, err)
 
-					hist := histograms[int(ts)]
-					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
-					_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
-					require.NoError(t, err)
+						hist := histograms[int(ts)]
+						expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
+						_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
+						require.NoError(t, err)
 
-					floatHist := floatHistogram[int(ts)]
-					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
-					_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
-					require.NoError(t, err)
+						floatHist := floatHistogram[int(ts)]
+						expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
+						_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
+						require.NoError(t, err)
 
 						// Add an exemplar and to create multiple WAL records.
 						if ts%10 == 0 {
@@ -4504,22 +4504,22 @@ func TestChunkSnapshot(t *testing.T) {
 					lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
 					lblsFloatHistStr := lblsFloatHist.String()
 
-				// 240 samples should m-map at least 1 chunk.
-				for ts := int64(241); ts <= 480; ts++ {
-					val := rand.Float64()
-					expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
-					ref, err := app.Append(0, lbls, ts, val)
-					require.NoError(t, err)
+					// 240 samples should m-map at least 1 chunk.
+					for ts := int64(241); ts <= 480; ts++ {
+						val := rand.Float64()
+						expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
+						ref, err := app.Append(0, lbls, ts, val)
+						require.NoError(t, err)
 
-					hist := histograms[int(ts)]
-					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
-					_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
-					require.NoError(t, err)
+						hist := histograms[int(ts)]
+						expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
+						_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
+						require.NoError(t, err)
 
-					floatHist := floatHistogram[int(ts)]
-					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
-					_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
-					require.NoError(t, err)
+						floatHist := floatHistogram[int(ts)]
+						expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
+						_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
+						require.NoError(t, err)
 
 						// Add an exemplar and to create multiple WAL records.
 						if ts%10 == 0 {
