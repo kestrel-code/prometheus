@@ -4674,102 +4674,104 @@ func TestMetadataCheckpointingOnlyKeepsLatestEntry(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	ctx := context.Background()
-	numSamples := 10000
-	hb, w := newTestHead(t, int64(numSamples)*10, compression.None, false)
+	for _, enableStStorage := range []bool{false, true} {
+		ctx := context.Background()
+		numSamples := 10000
+		hb, w := newTestHead(t, int64(numSamples)*10, compression.None, false)
 
-	// Add some series so we can append metadata to them.
-	app := hb.Appender(ctx)
-	s1 := labels.FromStrings("a", "b")
-	s2 := labels.FromStrings("c", "d")
-	s3 := labels.FromStrings("e", "f")
-	s4 := labels.FromStrings("g", "h")
+		// Add some series so we can append metadata to them.
+		app := hb.Appender(ctx)
+		s1 := labels.FromStrings("a", "b")
+		s2 := labels.FromStrings("c", "d")
+		s3 := labels.FromStrings("e", "f")
+		s4 := labels.FromStrings("g", "h")
 
-	for _, s := range []labels.Labels{s1, s2, s3, s4} {
-		_, err := app.Append(0, s, 0, 0)
-		require.NoError(t, err)
-	}
-	require.NoError(t, app.Commit())
-
-	// Add a first round of metadata to the first three series.
-	// Re-take the Appender, as the previous Commit will have it closed.
-	m1 := metadata.Metadata{Type: "gauge", Unit: "unit_1", Help: "help_1"}
-	m2 := metadata.Metadata{Type: "gauge", Unit: "unit_2", Help: "help_2"}
-	m3 := metadata.Metadata{Type: "gauge", Unit: "unit_3", Help: "help_3"}
-	m4 := metadata.Metadata{Type: "gauge", Unit: "unit_4", Help: "help_4"}
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s1, m1)
-	updateMetadata(t, app, s2, m2)
-	updateMetadata(t, app, s3, m3)
-	updateMetadata(t, app, s4, m4)
-	require.NoError(t, app.Commit())
-
-	// Update metadata for first series.
-	m5 := metadata.Metadata{Type: "counter", Unit: "unit_5", Help: "help_5"}
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s1, m5)
-	require.NoError(t, app.Commit())
-
-	// Switch back-and-forth metadata for second series.
-	// Since it ended on a new metadata record, we expect a single new entry.
-	m6 := metadata.Metadata{Type: "counter", Unit: "unit_6", Help: "help_6"}
-
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s2, m6)
-	require.NoError(t, app.Commit())
-
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s2, m2)
-	require.NoError(t, app.Commit())
-
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s2, m6)
-	require.NoError(t, app.Commit())
-
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s2, m2)
-	require.NoError(t, app.Commit())
-
-	app = hb.Appender(ctx)
-	updateMetadata(t, app, s2, m6)
-	require.NoError(t, app.Commit())
-
-	// Let's create a checkpoint.
-	first, last, err := wlog.Segments(w.Dir())
-	require.NoError(t, err)
-	keep := func(id chunks.HeadSeriesRef) bool {
-		return id != 3
-	}
-	_, err = wlog.Checkpoint(promslog.NewNopLogger(), w, first, last-1, keep, 0, true)
-	require.NoError(t, err)
-
-	// Confirm there's been a checkpoint.
-	cdir, _, err := wlog.LastCheckpoint(w.Dir())
-	require.NoError(t, err)
-
-	// Read in checkpoint and WAL.
-	recs := readTestWAL(t, cdir)
-	var gotMetadataBlocks [][]record.RefMetadata
-	for _, rec := range recs {
-		if mr, ok := rec.([]record.RefMetadata); ok {
-			gotMetadataBlocks = append(gotMetadataBlocks, mr)
+		for _, s := range []labels.Labels{s1, s2, s3, s4} {
+			_, err := app.Append(0, s, 0, 0)
+			require.NoError(t, err)
 		}
-	}
+		require.NoError(t, app.Commit())
 
-	// There should only be 1 metadata block present, with only the latest
-	// metadata kept around.
-	wantMetadata := []record.RefMetadata{
-		{Ref: 1, Type: record.GetMetricType(m5.Type), Unit: m5.Unit, Help: m5.Help},
-		{Ref: 2, Type: record.GetMetricType(m6.Type), Unit: m6.Unit, Help: m6.Help},
-		{Ref: 4, Type: record.GetMetricType(m4.Type), Unit: m4.Unit, Help: m4.Help},
-	}
-	require.Len(t, gotMetadataBlocks, 1)
-	require.Len(t, gotMetadataBlocks[0], 3)
-	gotMetadataBlock := gotMetadataBlocks[0]
+		// Add a first round of metadata to the first three series.
+		// Re-take the Appender, as the previous Commit will have it closed.
+		m1 := metadata.Metadata{Type: "gauge", Unit: "unit_1", Help: "help_1"}
+		m2 := metadata.Metadata{Type: "gauge", Unit: "unit_2", Help: "help_2"}
+		m3 := metadata.Metadata{Type: "gauge", Unit: "unit_3", Help: "help_3"}
+		m4 := metadata.Metadata{Type: "gauge", Unit: "unit_4", Help: "help_4"}
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s1, m1)
+		updateMetadata(t, app, s2, m2)
+		updateMetadata(t, app, s3, m3)
+		updateMetadata(t, app, s4, m4)
+		require.NoError(t, app.Commit())
 
-	sort.Slice(gotMetadataBlock, func(i, j int) bool { return gotMetadataBlock[i].Ref < gotMetadataBlock[j].Ref })
-	require.Equal(t, wantMetadata, gotMetadataBlock)
-	require.NoError(t, hb.Close())
+		// Update metadata for first series.
+		m5 := metadata.Metadata{Type: "counter", Unit: "unit_5", Help: "help_5"}
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s1, m5)
+		require.NoError(t, app.Commit())
+
+		// Switch back-and-forth metadata for second series.
+		// Since it ended on a new metadata record, we expect a single new entry.
+		m6 := metadata.Metadata{Type: "counter", Unit: "unit_6", Help: "help_6"}
+
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s2, m6)
+		require.NoError(t, app.Commit())
+
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s2, m2)
+		require.NoError(t, app.Commit())
+
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s2, m6)
+		require.NoError(t, app.Commit())
+
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s2, m2)
+		require.NoError(t, app.Commit())
+
+		app = hb.Appender(ctx)
+		updateMetadata(t, app, s2, m6)
+		require.NoError(t, app.Commit())
+
+		// Let's create a checkpoint.
+		first, last, err := wlog.Segments(w.Dir())
+		require.NoError(t, err)
+		keep := func(id chunks.HeadSeriesRef) bool {
+			return id != 3
+		}
+		_, err = wlog.Checkpoint(promslog.NewNopLogger(), w, first, last-1, keep, 0, enableStStorage)
+		require.NoError(t, err)
+
+		// Confirm there's been a checkpoint.
+		cdir, _, err := wlog.LastCheckpoint(w.Dir())
+		require.NoError(t, err)
+
+		// Read in checkpoint and WAL.
+		recs := readTestWAL(t, cdir)
+		var gotMetadataBlocks [][]record.RefMetadata
+		for _, rec := range recs {
+			if mr, ok := rec.([]record.RefMetadata); ok {
+				gotMetadataBlocks = append(gotMetadataBlocks, mr)
+			}
+		}
+
+		// There should only be 1 metadata block present, with only the latest
+		// metadata kept around.
+		wantMetadata := []record.RefMetadata{
+			{Ref: 1, Type: record.GetMetricType(m5.Type), Unit: m5.Unit, Help: m5.Help},
+			{Ref: 2, Type: record.GetMetricType(m6.Type), Unit: m6.Unit, Help: m6.Help},
+			{Ref: 4, Type: record.GetMetricType(m4.Type), Unit: m4.Unit, Help: m4.Help},
+		}
+		require.Len(t, gotMetadataBlocks, 1)
+		require.Len(t, gotMetadataBlocks[0], 3)
+		gotMetadataBlock := gotMetadataBlocks[0]
+
+		sort.Slice(gotMetadataBlock, func(i, j int) bool { return gotMetadataBlock[i].Ref < gotMetadataBlock[j].Ref })
+		require.Equal(t, wantMetadata, gotMetadataBlock)
+		require.NoError(t, hb.Close())
+	}
 }
 
 func TestMetadataAssertInMemoryData(t *testing.T) {

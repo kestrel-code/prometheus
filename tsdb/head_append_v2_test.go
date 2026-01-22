@@ -2147,7 +2147,8 @@ func TestChunkSnapshot_AppenderV2(t *testing.T) {
 		checkExemplars()
 	}
 
-	{ // Initial data that goes into snapshot.
+	for _, enableStStorage := range []bool{false, true} {
+		// Initial data that goes into snapshot.
 		// Add some initial samples with >=1 m-map chunk.
 		app := head.AppenderV2(context.Background())
 		for i := 1; i <= numSeries; i++ {
@@ -2190,7 +2191,7 @@ func TestChunkSnapshot_AppenderV2(t *testing.T) {
 		require.NoError(t, app.Commit())
 
 		// Add some tombstones.
-		enc := record.Encoder{EnableSTStorage: true}
+		enc := record.Encoder{EnableSTStorage: enableStStorage}
 		for i := 1; i <= numSeries; i++ {
 			ref := storage.SeriesRef(i)
 			itvs := tombstones.Intervals{
@@ -2225,7 +2226,8 @@ func TestChunkSnapshot_AppenderV2(t *testing.T) {
 		openHeadAndCheckReplay()
 	}
 
-	{ // Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
+	for _, enableStStorage := range []bool{false, true} {
+		// Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
 		// Add more samples.
 		app := head.AppenderV2(context.Background())
 		for i := 1; i <= numSeries; i++ {
@@ -2268,7 +2270,7 @@ func TestChunkSnapshot_AppenderV2(t *testing.T) {
 		require.NoError(t, app.Commit())
 
 		// Add more tombstones.
-		enc := record.Encoder{EnableSTStorage: true}
+		enc := record.Encoder{EnableSTStorage: enableStStorage}
 		for i := 1; i <= numSeries; i++ {
 			ref := storage.SeriesRef(i)
 			itvs := tombstones.Intervals{
