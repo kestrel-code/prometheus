@@ -405,7 +405,7 @@ func TestReadToEndWithCheckpoint(t *testing.T) {
 					}
 				}
 
-				Checkpoint(promslog.NewNopLogger(), w, 0, 1, func(chunks.HeadSeriesRef) bool { return true }, 0, true)
+				Checkpoint(promslog.NewNopLogger(), w, 0, 1, func(chunks.HeadSeriesRef) bool { return true }, 0, enableStStorage)
 				w.Truncate(1)
 
 				// Write more records after checkpointing.
@@ -498,7 +498,7 @@ func TestReadCheckpoint(t *testing.T) {
 				}
 				_, err = w.NextSegmentSync()
 				require.NoError(t, err)
-				_, err = Checkpoint(promslog.NewNopLogger(), w, 30, 31, func(chunks.HeadSeriesRef) bool { return true }, 0, true)
+				_, err = Checkpoint(promslog.NewNopLogger(), w, 30, 31, func(chunks.HeadSeriesRef) bool { return true }, 0, enableStStorage)
 				require.NoError(t, err)
 				require.NoError(t, w.Truncate(32))
 
@@ -750,8 +750,8 @@ func TestRun_StartupTime(t *testing.T) {
 	}
 }
 
-func generateWALRecords(w *WL, segment, seriesCount, samplesCount int) error {
-	enc := record.Encoder{EnableSTStorage: true}
+func generateWALRecords(w *WL, segment, seriesCount, samplesCount int, enableStStorage bool) error {
+	enc := record.Encoder{EnableSTStorage: enableStStorage}
 	for j := range seriesCount {
 		ref := j + (segment * 100)
 		series := enc.Series([]record.RefSeries{
@@ -791,61 +791,63 @@ func TestRun_AvoidNotifyWhenBehind(t *testing.T) {
 	const seriesCount = 10
 	const samplesCount = 50
 
-	for _, compress := range compression.Types() {
-		t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
-			dir := t.TempDir()
+	for _, enableStStorage := range []bool{false, true} {
+		for _, compress := range compression.Types() {
+			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+				dir := t.TempDir()
 
-			wdir := path.Join(dir, "wal")
-			err := os.Mkdir(wdir, 0o777)
-			require.NoError(t, err)
+				wdir := path.Join(dir, "wal")
+				err := os.Mkdir(wdir, 0o777)
+				require.NoError(t, err)
 
-			w, err := NewSize(nil, nil, wdir, segmentSize, compress)
-			require.NoError(t, err)
-			// Write to 00000000, the watcher will read series from it.
-			require.NoError(t, generateWALRecords(w, 0, seriesCount, samplesCount))
-			// Create 00000001, the watcher will tail it once started.
-			w.NextSegment()
-
-			// Set up the watcher and run it in the background.
-			wt := newWriteToMock(time.Millisecond)
-			watcher := NewWatcher(wMetrics, nil, nil, "", wt, dir, false, false, false)
-			watcher.SetMetrics()
-			watcher.MaxSegment = segmentsToRead
-
-			var g errgroup.Group
-			g.Go(func() error {
-				startTime := time.Now()
-				err = watcher.Run()
-				if err != nil {
-					return err
-				}
-				// If the watcher was to wait for readTicker to read every new segment, it would need readTimeout * segmentsToRead.
-				d := time.Since(startTime)
-				if d > readTimeout {
-					return fmt.Errorf("watcher ran for %s, it shouldn't rely on readTicker=%s to read the new segments", d, readTimeout)
-				}
-				return nil
-			})
-
-			// The watcher went through 00000000 and is tailing the next one.
-			retry(t, defaultRetryInterval, defaultRetries, func() bool {
-				return wt.checkNumSeries() == seriesCount
-			})
-
-			// In the meantime, add some new segments in bulk.
-			// We should end up with segmentsToWrite + 1 segments now.
-			for i := 1; i < segmentsToWrite; i++ {
-				require.NoError(t, generateWALRecords(w, i, seriesCount, samplesCount))
+				w, err := NewSize(nil, nil, wdir, segmentSize, compress)
+				require.NoError(t, err)
+				// Write to 00000000, the watcher will read series from it.
+				require.NoError(t, generateWALRecords(w, 0, seriesCount, samplesCount, enableStStorage))
+				// Create 00000001, the watcher will tail it once started.
 				w.NextSegment()
-			}
 
-			// Wait for the watcher.
-			require.NoError(t, g.Wait())
+				// Set up the watcher and run it in the background.
+				wt := newWriteToMock(time.Millisecond)
+				watcher := NewWatcher(wMetrics, nil, nil, "", wt, dir, false, false, false)
+				watcher.SetMetrics()
+				watcher.MaxSegment = segmentsToRead
 
-			// All series and samples were read.
-			require.Equal(t, (segmentsToRead+1)*seriesCount, wt.checkNumSeries()) // Series from 00000000 are also read.
-			require.Equal(t, segmentsToRead*seriesCount*samplesCount, wt.samplesAppended)
-			require.NoError(t, w.Close())
-		})
+				var g errgroup.Group
+				g.Go(func() error {
+					startTime := time.Now()
+					err = watcher.Run()
+					if err != nil {
+						return err
+					}
+					// If the watcher was to wait for readTicker to read every new segment, it would need readTimeout * segmentsToRead.
+					d := time.Since(startTime)
+					if d > readTimeout {
+						return fmt.Errorf("watcher ran for %s, it shouldn't rely on readTicker=%s to read the new segments", d, readTimeout)
+					}
+					return nil
+				})
+
+				// The watcher went through 00000000 and is tailing the next one.
+				retry(t, defaultRetryInterval, defaultRetries, func() bool {
+					return wt.checkNumSeries() == seriesCount
+				})
+
+				// In the meantime, add some new segments in bulk.
+				// We should end up with segmentsToWrite + 1 segments now.
+				for i := 1; i < segmentsToWrite; i++ {
+					require.NoError(t, generateWALRecords(w, i, seriesCount, samplesCount, enableStStorage))
+					w.NextSegment()
+				}
+
+				// Wait for the watcher.
+				require.NoError(t, g.Wait())
+
+				// All series and samples were read.
+				require.Equal(t, (segmentsToRead+1)*seriesCount, wt.checkNumSeries()) // Series from 00000000 are also read.
+				require.Equal(t, segmentsToRead*seriesCount*samplesCount, wt.samplesAppended)
+				require.NoError(t, w.Close())
+			})
+		}
 	}
 }

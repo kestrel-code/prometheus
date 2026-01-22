@@ -405,7 +405,7 @@ func TestCheckpointNoTmpFolderAfterError(t *testing.T) {
 		require.NoError(t, f.Close())
 
 		// Run the checkpoint and since the wlog contains corrupt data this should return an error.
-		_, err = Checkpoint(promslog.NewNopLogger(), w, 0, 1, nil, 0, true)
+		_, err = Checkpoint(promslog.NewNopLogger(), w, 0, 1, nil, 0, enableStStorage)
 		require.Error(t, err)
 
 		// Walk the wlog dir to make sure there are no tmp folder left behind after the error.

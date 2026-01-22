@@ -24,11 +24,6 @@ import (
 	"github.com/prometheus/prometheus/util/testrecord"
 )
 
-func TestEncodeDecode(t *testing.T) {
-	testEncodeDecode(t, false)
-	testEncodeDecode(t, true)
-}
-
 func zeroOutSTs(samples []record.RefSample) []record.RefSample {
 	out := make([]record.RefSample, len(samples))
 	for i := range samples {
@@ -38,78 +33,80 @@ func zeroOutSTs(samples []record.RefSample) []record.RefSample {
 	return out
 }
 
-func testEncodeDecode(t *testing.T, enableSTStorage bool) {
-	for _, tcase := range []testrecord.RefSamplesCase{
-		testrecord.Realistic1000Samples,
-		testrecord.Realistic1000WithVariableSTSamples,
-		testrecord.Realistic1000WithConstSTSamples,
-		testrecord.WorstCase1000,
-		testrecord.WorstCase1000WithSTSamples,
-	} {
-		var (
-			dec record.Decoder
-			buf []byte
-			enc = record.Encoder{EnableSTStorage: enableSTStorage}
-		)
+func TestEncodeDecode(t *testing.T) {
+	for _, enableStStorage := range []bool{false, true} {
+		for _, tcase := range []testrecord.RefSamplesCase{
+			testrecord.Realistic1000Samples,
+			testrecord.Realistic1000WithVariableSTSamples,
+			testrecord.Realistic1000WithConstSTSamples,
+			testrecord.WorstCase1000,
+			testrecord.WorstCase1000WithSTSamples,
+		} {
+			var (
+				dec record.Decoder
+				buf []byte
+				enc = record.Encoder{EnableSTStorage: enableStStorage}
+			)
 
-		s := testrecord.GenTestRefSamplesCase(t, tcase)
+			s := testrecord.GenTestRefSamplesCase(t, tcase)
 
-		{
-			got, err := dec.Samples(enc.Samples(s, nil), nil)
-			require.NoError(t, err)
-			// if ST is off, we expect all STs to be zero
-			expected := s
-			if !enableSTStorage {
-				expected = zeroOutSTs(s)
+			{
+				got, err := dec.Samples(enc.Samples(s, nil), nil)
+				require.NoError(t, err)
+				// if ST is off, we expect all STs to be zero
+				expected := s
+				if !enableStStorage {
+					expected = zeroOutSTs(s)
+				}
+
+				require.Equal(t, expected, got)
 			}
 
-			require.Equal(t, expected, got)
-		}
+			//  With byte buffer (append!)
+			{
+				buf = make([]byte, 10, 1e5)
+				got, err := dec.Samples(enc.Samples(s, buf)[10:], nil)
+				require.NoError(t, err)
 
-		//  With byte buffer (append!)
-		{
-			buf = make([]byte, 10, 1e5)
-			got, err := dec.Samples(enc.Samples(s, buf)[10:], nil)
-			require.NoError(t, err)
-
-			expected := s
-			if !enableSTStorage {
-				expected = zeroOutSTs(s)
+				expected := s
+				if !enableStStorage {
+					expected = zeroOutSTs(s)
+				}
+				require.Equal(t, expected, got)
 			}
-			require.Equal(t, expected, got)
-		}
 
-		// With sample slice
-		{
-			samples := make([]record.RefSample, 0, len(s)+1)
-			got, err := dec.Samples(enc.Samples(s, nil), samples)
-			require.NoError(t, err)
-			expected := s
-			if !enableSTStorage {
-				expected = zeroOutSTs(s)
+			// With sample slice
+			{
+				samples := make([]record.RefSample, 0, len(s)+1)
+				got, err := dec.Samples(enc.Samples(s, nil), samples)
+				require.NoError(t, err)
+				expected := s
+				if !enableStStorage {
+					expected = zeroOutSTs(s)
+				}
+				require.Equal(t, expected, got)
 			}
-			require.Equal(t, expected, got)
-		}
 
-		// With compression.
-		{
-			buf := enc.Samples(s, nil)
+			// With compression.
+			{
+				buf := enc.Samples(s, nil)
 
-			cEnc, err := compression.NewEncoder()
-			require.NoError(t, err)
-			buf, _, err = cEnc.Encode(compression.Zstd, buf, nil)
-			require.NoError(t, err)
+				cEnc, err := compression.NewEncoder()
+				require.NoError(t, err)
+				buf, _, err = cEnc.Encode(compression.Zstd, buf, nil)
+				require.NoError(t, err)
 
-			buf, err = compression.NewDecoder().Decode(compression.Zstd, buf, nil)
-			require.NoError(t, err)
+				buf, err = compression.NewDecoder().Decode(compression.Zstd, buf, nil)
+				require.NoError(t, err)
 
-			got, err := dec.Samples(buf, nil)
-			require.NoError(t, err)
-			expected := s
-			if !enableSTStorage {
-				expected = zeroOutSTs(s)
+				got, err := dec.Samples(buf, nil)
+				require.NoError(t, err)
+				expected := s
+				if !enableStStorage {
+					expected = zeroOutSTs(s)
+				}
+				require.Equal(t, expected, got)
 			}
-			require.Equal(t, expected, got)
 		}
 	}
 }

@@ -2148,192 +2148,192 @@ func TestChunkSnapshot_AppenderV2(t *testing.T) {
 	}
 
 	for _, enableStStorage := range []bool{false, true} {
-		// Initial data that goes into snapshot.
-		// Add some initial samples with >=1 m-map chunk.
-		app := head.AppenderV2(context.Background())
-		for i := 1; i <= numSeries; i++ {
-			lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
-			lblStr := lbls.String()
-			lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
-			lblsHistStr := lblsHist.String()
-			lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
-			lblsFloatHistStr := lblsFloatHist.String()
+		{ // Initial data that goes into snapshot.
+			// Add some initial samples with >=1 m-map chunk.
+			app := head.AppenderV2(context.Background())
+			for i := 1; i <= numSeries; i++ {
+				lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
+				lblStr := lbls.String()
+				lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
+				lblsHistStr := lblsHist.String()
+				lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
+				lblsFloatHistStr := lblsFloatHist.String()
 
-			// 240 samples should m-map at least 1 chunk.
-			for ts := int64(1); ts <= 240; ts++ {
-				// Add an exemplar, but only to float sample.
-				aOpts := storage.AOptions{}
-				if ts%10 == 0 {
-					aOpts.Exemplars = []exemplar.Exemplar{newExemplar(lbls, ts)}
-				}
-				val := rand.Float64()
-				expSeries[lblStr] = append(expSeries[lblStr], sample{ts, val, nil, nil})
-				_, err := app.Append(0, lbls, 0, ts, val, nil, nil, aOpts)
-				require.NoError(t, err)
+				// 240 samples should m-map at least 1 chunk.
+				for ts := int64(1); ts <= 240; ts++ {
+					// Add an exemplar, but only to float sample.
+					aOpts := storage.AOptions{}
+					if ts%10 == 0 {
+						aOpts.Exemplars = []exemplar.Exemplar{newExemplar(lbls, ts)}
+					}
+					val := rand.Float64()
+					expSeries[lblStr] = append(expSeries[lblStr], sample{ts, val, nil, nil})
+					_, err := app.Append(0, lbls, 0, ts, val, nil, nil, aOpts)
+					require.NoError(t, err)
 
-				hist := histograms[int(ts)]
-				expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{ts, 0, hist, nil})
-				_, err = app.Append(0, lblsHist, 0, ts, 0, hist, nil, storage.AOptions{})
-				require.NoError(t, err)
+					hist := histograms[int(ts)]
+					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{ts, 0, hist, nil})
+					_, err = app.Append(0, lblsHist, 0, ts, 0, hist, nil, storage.AOptions{})
+					require.NoError(t, err)
 
-				floatHist := floatHistogram[int(ts)]
-				expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{ts, 0, nil, floatHist})
-				_, err = app.Append(0, lblsFloatHist, 0, ts, 0, nil, floatHist, storage.AOptions{})
-				require.NoError(t, err)
+					floatHist := floatHistogram[int(ts)]
+					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{ts, 0, nil, floatHist})
+					_, err = app.Append(0, lblsFloatHist, 0, ts, 0, nil, floatHist, storage.AOptions{})
+					require.NoError(t, err)
 
-				// Create multiple WAL records (commit).
-				if ts%10 == 0 {
-					require.NoError(t, app.Commit())
-					app = head.AppenderV2(context.Background())
-				}
-			}
-		}
-		require.NoError(t, app.Commit())
-
-		// Add some tombstones.
-		enc := record.Encoder{EnableSTStorage: enableStStorage}
-		for i := 1; i <= numSeries; i++ {
-			ref := storage.SeriesRef(i)
-			itvs := tombstones.Intervals{
-				{Mint: 1234, Maxt: 2345},
-				{Mint: 3456, Maxt: 4567},
-			}
-			for _, itv := range itvs {
-				expTombstones[ref].Add(itv)
-			}
-			head.tombstones.AddInterval(ref, itvs...)
-			err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
-				{Ref: ref, Intervals: itvs},
-			}, nil))
-			require.NoError(t, err)
-		}
-	}
-
-	// These references should be the ones used for the snapshot.
-	wlast, woffset, err = head.wal.LastSegmentAndOffset()
-	require.NoError(t, err)
-	if woffset != 0 && woffset < 32*1024 {
-		// The page is always filled before taking the snapshot.
-		woffset = 32 * 1024
-	}
-
-	{
-		// Creating snapshot and verifying it.
-		head.opts.EnableMemorySnapshotOnShutdown = true
-		closeHeadAndCheckSnapshot() // This will create a snapshot.
-
-		// Test the replay of snapshot.
-		openHeadAndCheckReplay()
-	}
-
-	for _, enableStStorage := range []bool{false, true} {
-		// Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
-		// Add more samples.
-		app := head.AppenderV2(context.Background())
-		for i := 1; i <= numSeries; i++ {
-			lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
-			lblStr := lbls.String()
-			lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
-			lblsHistStr := lblsHist.String()
-			lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
-			lblsFloatHistStr := lblsFloatHist.String()
-
-			// 240 samples should m-map at least 1 chunk.
-			for ts := int64(241); ts <= 480; ts++ {
-				// Add an exemplar, but only to float sample.
-				aOpts := storage.AOptions{}
-				if ts%10 == 0 {
-					aOpts.Exemplars = []exemplar.Exemplar{newExemplar(lbls, ts)}
-				}
-				val := rand.Float64()
-				expSeries[lblStr] = append(expSeries[lblStr], sample{ts, val, nil, nil})
-				_, err := app.Append(0, lbls, 0, ts, val, nil, nil, aOpts)
-				require.NoError(t, err)
-
-				hist := histograms[int(ts)]
-				expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{ts, 0, hist, nil})
-				_, err = app.Append(0, lblsHist, 0, ts, 0, hist, nil, storage.AOptions{})
-				require.NoError(t, err)
-
-				floatHist := floatHistogram[int(ts)]
-				expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{ts, 0, nil, floatHist})
-				_, err = app.Append(0, lblsFloatHist, 0, ts, 0, nil, floatHist, storage.AOptions{})
-				require.NoError(t, err)
-
-				// Create multiple WAL records (commit).
-				if ts%10 == 0 {
-					require.NoError(t, app.Commit())
-					app = head.AppenderV2(context.Background())
+					// Create multiple WAL records (commit).
+					if ts%10 == 0 {
+						require.NoError(t, app.Commit())
+						app = head.AppenderV2(context.Background())
+					}
 				}
 			}
-		}
-		require.NoError(t, app.Commit())
+			require.NoError(t, app.Commit())
 
-		// Add more tombstones.
-		enc := record.Encoder{EnableSTStorage: enableStStorage}
-		for i := 1; i <= numSeries; i++ {
-			ref := storage.SeriesRef(i)
-			itvs := tombstones.Intervals{
-				{Mint: 12345, Maxt: 23456},
-				{Mint: 34567, Maxt: 45678},
+			// Add some tombstones.
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			for i := 1; i <= numSeries; i++ {
+				ref := storage.SeriesRef(i)
+				itvs := tombstones.Intervals{
+					{Mint: 1234, Maxt: 2345},
+					{Mint: 3456, Maxt: 4567},
+				}
+				for _, itv := range itvs {
+					expTombstones[ref].Add(itv)
+				}
+				head.tombstones.AddInterval(ref, itvs...)
+				err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
+					{Ref: ref, Intervals: itvs},
+				}, nil))
+				require.NoError(t, err)
 			}
-			for _, itv := range itvs {
-				expTombstones[ref].Add(itv)
-			}
-			head.tombstones.AddInterval(ref, itvs...)
-			err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
-				{Ref: ref, Intervals: itvs},
-			}, nil))
-			require.NoError(t, err)
 		}
-	}
-	{
-		// Close Head and verify that new snapshot was not created.
-		head.opts.EnableMemorySnapshotOnShutdown = false
-		closeHeadAndCheckSnapshot() // This should not create a snapshot.
 
-		// Test the replay of snapshot, m-map chunks, and WAL.
-		head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
-		openHeadAndCheckReplay()
-	}
-
-	// Creating another snapshot should delete the older snapshot and replay still works fine.
-	wlast, woffset, err = head.wal.LastSegmentAndOffset()
-	require.NoError(t, err)
-	if woffset != 0 && woffset < 32*1024 {
-		// The page is always filled before taking the snapshot.
-		woffset = 32 * 1024
-	}
-
-	{
-		// Close Head and verify that new snapshot was created.
-		closeHeadAndCheckSnapshot()
-
-		// Verify that there is only 1 snapshot.
-		files, err := os.ReadDir(head.opts.ChunkDirRoot)
+		// These references should be the ones used for the snapshot.
+		wlast, woffset, err = head.wal.LastSegmentAndOffset()
 		require.NoError(t, err)
-		snapshots := 0
-		for i := len(files) - 1; i >= 0; i-- {
-			fi := files[i]
-			if strings.HasPrefix(fi.Name(), chunkSnapshotPrefix) {
-				snapshots++
-				require.Equal(t, chunkSnapshotDir(wlast, woffset), fi.Name())
+		if woffset != 0 && woffset < 32*1024 {
+			// The page is always filled before taking the snapshot.
+			woffset = 32 * 1024
+		}
+
+		{
+			// Creating snapshot and verifying it.
+			head.opts.EnableMemorySnapshotOnShutdown = true
+			closeHeadAndCheckSnapshot() // This will create a snapshot.
+
+			// Test the replay of snapshot.
+			openHeadAndCheckReplay()
+		}
+
+		{ // Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
+			// Add more samples.
+			app := head.AppenderV2(context.Background())
+			for i := 1; i <= numSeries; i++ {
+				lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
+				lblStr := lbls.String()
+				lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
+				lblsHistStr := lblsHist.String()
+				lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
+				lblsFloatHistStr := lblsFloatHist.String()
+
+				// 240 samples should m-map at least 1 chunk.
+				for ts := int64(241); ts <= 480; ts++ {
+					// Add an exemplar, but only to float sample.
+					aOpts := storage.AOptions{}
+					if ts%10 == 0 {
+						aOpts.Exemplars = []exemplar.Exemplar{newExemplar(lbls, ts)}
+					}
+					val := rand.Float64()
+					expSeries[lblStr] = append(expSeries[lblStr], sample{ts, val, nil, nil})
+					_, err := app.Append(0, lbls, 0, ts, val, nil, nil, aOpts)
+					require.NoError(t, err)
+
+					hist := histograms[int(ts)]
+					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{ts, 0, hist, nil})
+					_, err = app.Append(0, lblsHist, 0, ts, 0, hist, nil, storage.AOptions{})
+					require.NoError(t, err)
+
+					floatHist := floatHistogram[int(ts)]
+					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{ts, 0, nil, floatHist})
+					_, err = app.Append(0, lblsFloatHist, 0, ts, 0, nil, floatHist, storage.AOptions{})
+					require.NoError(t, err)
+
+					// Create multiple WAL records (commit).
+					if ts%10 == 0 {
+						require.NoError(t, app.Commit())
+						app = head.AppenderV2(context.Background())
+					}
+				}
+			}
+			require.NoError(t, app.Commit())
+
+			// Add more tombstones.
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			for i := 1; i <= numSeries; i++ {
+				ref := storage.SeriesRef(i)
+				itvs := tombstones.Intervals{
+					{Mint: 12345, Maxt: 23456},
+					{Mint: 34567, Maxt: 45678},
+				}
+				for _, itv := range itvs {
+					expTombstones[ref].Add(itv)
+				}
+				head.tombstones.AddInterval(ref, itvs...)
+				err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
+					{Ref: ref, Intervals: itvs},
+				}, nil))
+				require.NoError(t, err)
 			}
 		}
-		require.Equal(t, 1, snapshots)
+		{
+			// Close Head and verify that new snapshot was not created.
+			head.opts.EnableMemorySnapshotOnShutdown = false
+			closeHeadAndCheckSnapshot() // This should not create a snapshot.
 
-		// Test the replay of snapshot.
-		head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+			// Test the replay of snapshot, m-map chunks, and WAL.
+			head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+			openHeadAndCheckReplay()
+		}
 
-		// Disabling exemplars to check that it does not hard fail replay
-		// https://github.com/prometheus/prometheus/issues/9437#issuecomment-933285870.
-		head.opts.EnableExemplarStorage = false
-		head.opts.MaxExemplars.Store(0)
-		expExemplars = expExemplars[:0]
+		// Creating another snapshot should delete the older snapshot and replay still works fine.
+		wlast, woffset, err = head.wal.LastSegmentAndOffset()
+		require.NoError(t, err)
+		if woffset != 0 && woffset < 32*1024 {
+			// The page is always filled before taking the snapshot.
+			woffset = 32 * 1024
+		}
 
-		openHeadAndCheckReplay()
+		{
+			// Close Head and verify that new snapshot was created.
+			closeHeadAndCheckSnapshot()
 
-		require.Equal(t, 0.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
+			// Verify that there is only 1 snapshot.
+			files, err := os.ReadDir(head.opts.ChunkDirRoot)
+			require.NoError(t, err)
+			snapshots := 0
+			for i := len(files) - 1; i >= 0; i-- {
+				fi := files[i]
+				if strings.HasPrefix(fi.Name(), chunkSnapshotPrefix) {
+					snapshots++
+					require.Equal(t, chunkSnapshotDir(wlast, woffset), fi.Name())
+				}
+			}
+			require.Equal(t, 1, snapshots)
+
+			// Test the replay of snapshot.
+			head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+
+			// Disabling exemplars to check that it does not hard fail replay
+			// https://github.com/prometheus/prometheus/issues/9437#issuecomment-933285870.
+			head.opts.EnableExemplarStorage = false
+			head.opts.MaxExemplars.Store(0)
+			expExemplars = expExemplars[:0]
+
+			openHeadAndCheckReplay()
+
+			require.Equal(t, 0.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
+		}
 	}
 }
 

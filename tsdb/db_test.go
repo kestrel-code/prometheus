@@ -1167,62 +1167,66 @@ func testWALReplayRaceOnSamplesLoggedBeforeSeries(t *testing.T, numSamplesBefore
 	db := newTestDB(t)
 	db.DisableCompactions()
 
-	for seriesRef := 1; seriesRef <= numSeries; seriesRef++ {
-		// Log samples before the series is logged to the WAL.
-		enc := record.Encoder{EnableSTStorage: true}
-		var samples []record.RefSample
+	for _, enableStStorage := range []bool{false, true} {
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			for seriesRef := 1; seriesRef <= numSeries; seriesRef++ {
+				// Log samples before the series is logged to the WAL.
+				enc := record.Encoder{EnableSTStorage: enableStStorage}
+				var samples []record.RefSample
 
-		for ts := range numSamplesBeforeSeriesCreation {
-			samples = append(samples, record.RefSample{
-				Ref: chunks.HeadSeriesRef(uint64(seriesRef)),
-				T:   int64(ts),
-				V:   float64(ts),
-			})
-		}
+				for ts := range numSamplesBeforeSeriesCreation {
+					samples = append(samples, record.RefSample{
+						Ref: chunks.HeadSeriesRef(uint64(seriesRef)),
+						T:   int64(ts),
+						V:   float64(ts),
+					})
+				}
 
-		err := db.Head().wal.Log(enc.Samples(samples, nil))
-		require.NoError(t, err)
+				err := db.Head().wal.Log(enc.Samples(samples, nil))
+				require.NoError(t, err)
 
-		// Add samples via appender so that they're logged after the series in the WAL.
-		app := db.Appender(context.Background())
-		lbls := labels.FromStrings("series_id", strconv.Itoa(seriesRef))
+				// Add samples via appender so that they're logged after the series in the WAL.
+				app := db.Appender(context.Background())
+				lbls := labels.FromStrings("series_id", strconv.Itoa(seriesRef))
 
-		for ts := numSamplesBeforeSeriesCreation; ts < numSamplesBeforeSeriesCreation+numSamplesAfterSeriesCreation; ts++ {
-			_, err := app.Append(0, lbls, int64(ts), float64(ts))
+				for ts := numSamplesBeforeSeriesCreation; ts < numSamplesBeforeSeriesCreation+numSamplesAfterSeriesCreation; ts++ {
+					_, err := app.Append(0, lbls, int64(ts), float64(ts))
+					require.NoError(t, err)
+				}
+				require.NoError(t, app.Commit())
+			}
+
+			require.NoError(t, db.Close())
+
+			// Reopen the DB, replaying the WAL.
+			db = newTestDB(t, withDir(db.Dir()))
+
+			// Query back chunks for all series.
+			q, err := db.ChunkQuerier(math.MinInt64, math.MaxInt64)
 			require.NoError(t, err)
-		}
-		require.NoError(t, app.Commit())
+
+			set := q.Select(context.Background(), false, nil, labels.MustNewMatcher(labels.MatchRegexp, "series_id", ".+"))
+			actualSeries := 0
+			var chunksIt chunks.Iterator
+
+			for set.Next() {
+				actualSeries++
+				actualChunks := 0
+
+				chunksIt = set.At().Iterator(chunksIt)
+				for chunksIt.Next() {
+					actualChunks++
+				}
+				require.NoError(t, chunksIt.Err())
+
+				// We expect 1 chunk every 120 samples after series creation.
+				require.Equalf(t, (numSamplesAfterSeriesCreation/120)+1, actualChunks, "series: %s", set.At().Labels().String())
+			}
+
+			require.NoError(t, set.Err())
+			require.Equal(t, numSeries, actualSeries)
+		})
 	}
-
-	require.NoError(t, db.Close())
-
-	// Reopen the DB, replaying the WAL.
-	db = newTestDB(t, withDir(db.Dir()))
-
-	// Query back chunks for all series.
-	q, err := db.ChunkQuerier(math.MinInt64, math.MaxInt64)
-	require.NoError(t, err)
-
-	set := q.Select(context.Background(), false, nil, labels.MustNewMatcher(labels.MatchRegexp, "series_id", ".+"))
-	actualSeries := 0
-	var chunksIt chunks.Iterator
-
-	for set.Next() {
-		actualSeries++
-		actualChunks := 0
-
-		chunksIt = set.At().Iterator(chunksIt)
-		for chunksIt.Next() {
-			actualChunks++
-		}
-		require.NoError(t, chunksIt.Err())
-
-		// We expect 1 chunk every 120 samples after series creation.
-		require.Equalf(t, (numSamplesAfterSeriesCreation/120)+1, actualChunks, "series: %s", set.At().Labels().String())
-	}
-
-	require.NoError(t, set.Err())
-	require.Equal(t, numSeries, actualSeries)
 }
 
 func TestTombstoneClean(t *testing.T) {
@@ -2054,33 +2058,36 @@ func TestInitializeHeadTimestamp(t *testing.T) {
 		require.Equal(t, int64(1000), db.head.MaxTime())
 		require.True(t, db.head.initialized())
 	})
-	t.Run("wal-only", func(t *testing.T) {
-		dir := t.TempDir()
 
-		require.NoError(t, os.MkdirAll(path.Join(dir, "wal"), 0o777))
-		w, err := wlog.New(nil, nil, path.Join(dir, "wal"), compression.None)
-		require.NoError(t, err)
+	for _, enableStStorage := range []bool{false, true} {
+		t.Run("wal-only-st-"+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			dir := t.TempDir()
 
-		enc := record.Encoder{EnableSTStorage: true}
-		err = w.Log(
-			enc.Series([]record.RefSeries{
-				{Ref: 123, Labels: labels.FromStrings("a", "1")},
-				{Ref: 124, Labels: labels.FromStrings("a", "2")},
-			}, nil),
-			enc.Samples([]record.RefSample{
-				{Ref: 123, T: 5000, V: 1},
-				{Ref: 124, T: 15000, V: 1},
-			}, nil),
-		)
-		require.NoError(t, err)
-		require.NoError(t, w.Close())
+			require.NoError(t, os.MkdirAll(path.Join(dir, "wal"), 0o777))
+			w, err := wlog.New(nil, nil, path.Join(dir, "wal"), compression.None)
+			require.NoError(t, err)
 
-		db := newTestDB(t, withDir(dir))
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			err = w.Log(
+				enc.Series([]record.RefSeries{
+					{Ref: 123, Labels: labels.FromStrings("a", "1")},
+					{Ref: 124, Labels: labels.FromStrings("a", "2")},
+				}, nil),
+				enc.Samples([]record.RefSample{
+					{Ref: 123, T: 5000, V: 1},
+					{Ref: 124, T: 15000, V: 1},
+				}, nil),
+			)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
 
-		require.Equal(t, int64(5000), db.head.MinTime())
-		require.Equal(t, int64(15000), db.head.MaxTime())
-		require.True(t, db.head.initialized())
-	})
+			db := newTestDB(t, withDir(dir))
+
+			require.Equal(t, int64(5000), db.head.MinTime())
+			require.Equal(t, int64(15000), db.head.MaxTime())
+			require.True(t, db.head.initialized())
+		})
+	}
 	t.Run("existing-block", func(t *testing.T) {
 		dir := t.TempDir()
 
@@ -2092,37 +2099,40 @@ func TestInitializeHeadTimestamp(t *testing.T) {
 		require.Equal(t, int64(2000), db.head.MaxTime())
 		require.True(t, db.head.initialized())
 	})
-	t.Run("existing-block-and-wal", func(t *testing.T) {
-		dir := t.TempDir()
 
-		createBlock(t, dir, genSeries(1, 1, 1000, 6000))
+	for _, enableStStorage := range []bool{false, true} {
+		t.Run("existing-block-and-wal-"+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			dir := t.TempDir()
 
-		require.NoError(t, os.MkdirAll(path.Join(dir, "wal"), 0o777))
-		w, err := wlog.New(nil, nil, path.Join(dir, "wal"), compression.None)
-		require.NoError(t, err)
+			createBlock(t, dir, genSeries(1, 1, 1000, 6000))
 
-		enc := record.Encoder{EnableSTStorage: true}
-		err = w.Log(
-			enc.Series([]record.RefSeries{
-				{Ref: 123, Labels: labels.FromStrings("a", "1")},
-				{Ref: 124, Labels: labels.FromStrings("a", "2")},
-			}, nil),
-			enc.Samples([]record.RefSample{
-				{Ref: 123, T: 5000, V: 1},
-				{Ref: 124, T: 15000, V: 1},
-			}, nil),
-		)
-		require.NoError(t, err)
-		require.NoError(t, w.Close())
+			require.NoError(t, os.MkdirAll(path.Join(dir, "wal"), 0o777))
+			w, err := wlog.New(nil, nil, path.Join(dir, "wal"), compression.None)
+			require.NoError(t, err)
 
-		db := newTestDB(t, withDir(dir))
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			err = w.Log(
+				enc.Series([]record.RefSeries{
+					{Ref: 123, Labels: labels.FromStrings("a", "1")},
+					{Ref: 124, Labels: labels.FromStrings("a", "2")},
+				}, nil),
+				enc.Samples([]record.RefSample{
+					{Ref: 123, T: 5000, V: 1},
+					{Ref: 124, T: 15000, V: 1},
+				}, nil),
+			)
+			require.NoError(t, err)
+			require.NoError(t, w.Close())
 
-		require.Equal(t, int64(6000), db.head.MinTime())
-		require.Equal(t, int64(15000), db.head.MaxTime())
-		require.True(t, db.head.initialized())
-		// Check that old series has been GCed.
-		require.Equal(t, 1.0, prom_testutil.ToFloat64(db.head.metrics.series))
-	})
+			db := newTestDB(t, withDir(dir))
+
+			require.Equal(t, int64(6000), db.head.MinTime())
+			require.Equal(t, int64(15000), db.head.MaxTime())
+			require.True(t, db.head.initialized())
+			// Check that old series has been GCed.
+			require.Equal(t, 1.0, prom_testutil.ToFloat64(db.head.metrics.series))
+		})
+	}
 }
 
 func TestNoEmptyBlocks(t *testing.T) {
@@ -4675,102 +4685,104 @@ func TestMetadataCheckpointingOnlyKeepsLatestEntry(t *testing.T) {
 	}
 
 	for _, enableStStorage := range []bool{false, true} {
-		ctx := context.Background()
-		numSamples := 10000
-		hb, w := newTestHead(t, int64(numSamples)*10, compression.None, false)
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			ctx := context.Background()
+			numSamples := 10000
+			hb, w := newTestHead(t, int64(numSamples)*10, compression.None, false)
 
-		// Add some series so we can append metadata to them.
-		app := hb.Appender(ctx)
-		s1 := labels.FromStrings("a", "b")
-		s2 := labels.FromStrings("c", "d")
-		s3 := labels.FromStrings("e", "f")
-		s4 := labels.FromStrings("g", "h")
+			// Add some series so we can append metadata to them.
+			app := hb.Appender(ctx)
+			s1 := labels.FromStrings("a", "b")
+			s2 := labels.FromStrings("c", "d")
+			s3 := labels.FromStrings("e", "f")
+			s4 := labels.FromStrings("g", "h")
 
-		for _, s := range []labels.Labels{s1, s2, s3, s4} {
-			_, err := app.Append(0, s, 0, 0)
-			require.NoError(t, err)
-		}
-		require.NoError(t, app.Commit())
-
-		// Add a first round of metadata to the first three series.
-		// Re-take the Appender, as the previous Commit will have it closed.
-		m1 := metadata.Metadata{Type: "gauge", Unit: "unit_1", Help: "help_1"}
-		m2 := metadata.Metadata{Type: "gauge", Unit: "unit_2", Help: "help_2"}
-		m3 := metadata.Metadata{Type: "gauge", Unit: "unit_3", Help: "help_3"}
-		m4 := metadata.Metadata{Type: "gauge", Unit: "unit_4", Help: "help_4"}
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s1, m1)
-		updateMetadata(t, app, s2, m2)
-		updateMetadata(t, app, s3, m3)
-		updateMetadata(t, app, s4, m4)
-		require.NoError(t, app.Commit())
-
-		// Update metadata for first series.
-		m5 := metadata.Metadata{Type: "counter", Unit: "unit_5", Help: "help_5"}
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s1, m5)
-		require.NoError(t, app.Commit())
-
-		// Switch back-and-forth metadata for second series.
-		// Since it ended on a new metadata record, we expect a single new entry.
-		m6 := metadata.Metadata{Type: "counter", Unit: "unit_6", Help: "help_6"}
-
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s2, m6)
-		require.NoError(t, app.Commit())
-
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s2, m2)
-		require.NoError(t, app.Commit())
-
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s2, m6)
-		require.NoError(t, app.Commit())
-
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s2, m2)
-		require.NoError(t, app.Commit())
-
-		app = hb.Appender(ctx)
-		updateMetadata(t, app, s2, m6)
-		require.NoError(t, app.Commit())
-
-		// Let's create a checkpoint.
-		first, last, err := wlog.Segments(w.Dir())
-		require.NoError(t, err)
-		keep := func(id chunks.HeadSeriesRef) bool {
-			return id != 3
-		}
-		_, err = wlog.Checkpoint(promslog.NewNopLogger(), w, first, last-1, keep, 0, enableStStorage)
-		require.NoError(t, err)
-
-		// Confirm there's been a checkpoint.
-		cdir, _, err := wlog.LastCheckpoint(w.Dir())
-		require.NoError(t, err)
-
-		// Read in checkpoint and WAL.
-		recs := readTestWAL(t, cdir)
-		var gotMetadataBlocks [][]record.RefMetadata
-		for _, rec := range recs {
-			if mr, ok := rec.([]record.RefMetadata); ok {
-				gotMetadataBlocks = append(gotMetadataBlocks, mr)
+			for _, s := range []labels.Labels{s1, s2, s3, s4} {
+				_, err := app.Append(0, s, 0, 0)
+				require.NoError(t, err)
 			}
-		}
+			require.NoError(t, app.Commit())
 
-		// There should only be 1 metadata block present, with only the latest
-		// metadata kept around.
-		wantMetadata := []record.RefMetadata{
-			{Ref: 1, Type: record.GetMetricType(m5.Type), Unit: m5.Unit, Help: m5.Help},
-			{Ref: 2, Type: record.GetMetricType(m6.Type), Unit: m6.Unit, Help: m6.Help},
-			{Ref: 4, Type: record.GetMetricType(m4.Type), Unit: m4.Unit, Help: m4.Help},
-		}
-		require.Len(t, gotMetadataBlocks, 1)
-		require.Len(t, gotMetadataBlocks[0], 3)
-		gotMetadataBlock := gotMetadataBlocks[0]
+			// Add a first round of metadata to the first three series.
+			// Re-take the Appender, as the previous Commit will have it closed.
+			m1 := metadata.Metadata{Type: "gauge", Unit: "unit_1", Help: "help_1"}
+			m2 := metadata.Metadata{Type: "gauge", Unit: "unit_2", Help: "help_2"}
+			m3 := metadata.Metadata{Type: "gauge", Unit: "unit_3", Help: "help_3"}
+			m4 := metadata.Metadata{Type: "gauge", Unit: "unit_4", Help: "help_4"}
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s1, m1)
+			updateMetadata(t, app, s2, m2)
+			updateMetadata(t, app, s3, m3)
+			updateMetadata(t, app, s4, m4)
+			require.NoError(t, app.Commit())
 
-		sort.Slice(gotMetadataBlock, func(i, j int) bool { return gotMetadataBlock[i].Ref < gotMetadataBlock[j].Ref })
-		require.Equal(t, wantMetadata, gotMetadataBlock)
-		require.NoError(t, hb.Close())
+			// Update metadata for first series.
+			m5 := metadata.Metadata{Type: "counter", Unit: "unit_5", Help: "help_5"}
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s1, m5)
+			require.NoError(t, app.Commit())
+
+			// Switch back-and-forth metadata for second series.
+			// Since it ended on a new metadata record, we expect a single new entry.
+			m6 := metadata.Metadata{Type: "counter", Unit: "unit_6", Help: "help_6"}
+
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s2, m6)
+			require.NoError(t, app.Commit())
+
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s2, m2)
+			require.NoError(t, app.Commit())
+
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s2, m6)
+			require.NoError(t, app.Commit())
+
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s2, m2)
+			require.NoError(t, app.Commit())
+
+			app = hb.Appender(ctx)
+			updateMetadata(t, app, s2, m6)
+			require.NoError(t, app.Commit())
+
+			// Let's create a checkpoint.
+			first, last, err := wlog.Segments(w.Dir())
+			require.NoError(t, err)
+			keep := func(id chunks.HeadSeriesRef) bool {
+				return id != 3
+			}
+			_, err = wlog.Checkpoint(promslog.NewNopLogger(), w, first, last-1, keep, 0, enableStStorage)
+			require.NoError(t, err)
+
+			// Confirm there's been a checkpoint.
+			cdir, _, err := wlog.LastCheckpoint(w.Dir())
+			require.NoError(t, err)
+
+			// Read in checkpoint and WAL.
+			recs := readTestWAL(t, cdir)
+			var gotMetadataBlocks [][]record.RefMetadata
+			for _, rec := range recs {
+				if mr, ok := rec.([]record.RefMetadata); ok {
+					gotMetadataBlocks = append(gotMetadataBlocks, mr)
+				}
+			}
+
+			// There should only be 1 metadata block present, with only the latest
+			// metadata kept around.
+			wantMetadata := []record.RefMetadata{
+				{Ref: 1, Type: record.GetMetricType(m5.Type), Unit: m5.Unit, Help: m5.Help},
+				{Ref: 2, Type: record.GetMetricType(m6.Type), Unit: m6.Unit, Help: m6.Help},
+				{Ref: 4, Type: record.GetMetricType(m4.Type), Unit: m4.Unit, Help: m4.Help},
+			}
+			require.Len(t, gotMetadataBlocks, 1)
+			require.Len(t, gotMetadataBlocks[0], 3)
+			gotMetadataBlock := gotMetadataBlocks[0]
+
+			sort.Slice(gotMetadataBlock, func(i, j int) bool { return gotMetadataBlock[i].Ref < gotMetadataBlock[j].Ref })
+			require.Equal(t, wantMetadata, gotMetadataBlock)
+			require.NoError(t, hb.Close())
+		})
 	}
 }
 
