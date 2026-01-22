@@ -277,7 +277,7 @@ func TestRecord_EncodeDecode(t *testing.T) {
 func TestRecord_DecodeInvalidHistogramSchema(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, schema := range []int32{-100, 100} {
-			t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+			t.Run(fmt.Sprintf("schema=%d,stStorage=%v", schema, enableStStorage), func(t *testing.T) {
 				enc := Encoder{EnableSTStorage: enableStStorage}
 
 				var output bytes.Buffer
@@ -314,7 +314,7 @@ func TestRecord_DecodeInvalidHistogramSchema(t *testing.T) {
 func TestRecord_DecodeInvalidFloatHistogramSchema(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, schema := range []int32{-100, 100} {
-			t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+			t.Run(fmt.Sprintf("schema=%d,stStorage=%v", schema, enableStStorage), func(t *testing.T) {
 				enc := Encoder{EnableSTStorage: enableStStorage}
 
 				var output bytes.Buffer
@@ -351,7 +351,7 @@ func TestRecord_DecodeInvalidFloatHistogramSchema(t *testing.T) {
 func TestRecord_DecodeTooHighResolutionHistogramSchema(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, schema := range []int32{9, 52} {
-			t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+			t.Run(fmt.Sprintf("schema=%d,stStorage=%v", schema, enableStStorage), func(t *testing.T) {
 				enc := Encoder{EnableSTStorage: enableStStorage}
 
 				var output bytes.Buffer
@@ -388,7 +388,7 @@ func TestRecord_DecodeTooHighResolutionHistogramSchema(t *testing.T) {
 func TestRecord_DecodeTooHighResolutionFloatHistogramSchema(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, schema := range []int32{9, 52} {
-			t.Run(fmt.Sprintf("schema=%d", schema), func(t *testing.T) {
+			t.Run(fmt.Sprintf("schema=%d,stStorage=%v", schema, enableStStorage), func(t *testing.T) {
 				enc := Encoder{EnableSTStorage: enableStStorage}
 
 				var output bytes.Buffer

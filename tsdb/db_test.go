@@ -1537,139 +1537,143 @@ func TestRetentionDurationMetric(t *testing.T) {
 
 func TestSizeRetention(t *testing.T) {
 	t.Parallel()
-	opts := DefaultOptions()
-	opts.OutOfOrderTimeWindow = 100
-	db := newTestDB(t, withOpts(opts), withRngs(100))
+	for _, enableStStorage := range []bool{false, true} {
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			opts := DefaultOptions()
+			opts.OutOfOrderTimeWindow = 100
+			db := newTestDB(t, withOpts(opts), withRngs(100))
 
-	blocks := []*BlockMeta{
-		{MinTime: 100, MaxTime: 200}, // Oldest block
-		{MinTime: 200, MaxTime: 300},
-		{MinTime: 300, MaxTime: 400},
-		{MinTime: 400, MaxTime: 500},
-		{MinTime: 500, MaxTime: 600}, // Newest Block
-	}
+			blocks := []*BlockMeta{
+				{MinTime: 100, MaxTime: 200}, // Oldest block
+				{MinTime: 200, MaxTime: 300},
+				{MinTime: 300, MaxTime: 400},
+				{MinTime: 400, MaxTime: 500},
+				{MinTime: 500, MaxTime: 600}, // Newest Block
+			}
 
-	for _, m := range blocks {
-		createBlock(t, db.Dir(), genSeries(100, 10, m.MinTime, m.MaxTime))
-	}
+			for _, m := range blocks {
+				createBlock(t, db.Dir(), genSeries(100, 10, m.MinTime, m.MaxTime))
+			}
 
-	headBlocks := []*BlockMeta{
-		{MinTime: 700, MaxTime: 800},
-	}
+			headBlocks := []*BlockMeta{
+				{MinTime: 700, MaxTime: 800},
+			}
 
-	// Add some data to the WAL.
-	headApp := db.Head().Appender(context.Background())
-	var aSeries labels.Labels
-	var it chunkenc.Iterator
-	for _, m := range headBlocks {
-		series := genSeries(100, 10, m.MinTime, m.MaxTime+1)
-		for _, s := range series {
-			aSeries = s.Labels()
-			it = s.Iterator(it)
-			for it.Next() == chunkenc.ValFloat {
-				tim, v := it.At()
-				_, err := headApp.Append(0, s.Labels(), tim, v)
+			// Add some data to the WAL.
+			headApp := db.Head().Appender(context.Background())
+			var aSeries labels.Labels
+			var it chunkenc.Iterator
+			for _, m := range headBlocks {
+				series := genSeries(100, 10, m.MinTime, m.MaxTime+1)
+				for _, s := range series {
+					aSeries = s.Labels()
+					it = s.Iterator(it)
+					for it.Next() == chunkenc.ValFloat {
+						tim, v := it.At()
+						_, err := headApp.Append(0, s.Labels(), tim, v)
+						require.NoError(t, err)
+					}
+					require.NoError(t, it.Err())
+				}
+			}
+			require.NoError(t, headApp.Commit())
+			db.Head().mmapHeadChunks()
+
+			require.Eventually(t, func() bool {
+				return db.Head().chunkDiskMapper.IsQueueEmpty()
+			}, 2*time.Second, 100*time.Millisecond)
+
+			// Test that registered size matches the actual disk size.
+			require.NoError(t, db.reloadBlocks())                               // Reload the db to register the new db size.
+			require.Len(t, db.Blocks(), len(blocks))                            // Ensure all blocks are registered.
+			blockSize := int64(prom_testutil.ToFloat64(db.metrics.blocksBytes)) // Use the actual internal metrics.
+			walSize, err := db.Head().wal.Size()
+			require.NoError(t, err)
+			cdmSize, err := db.Head().chunkDiskMapper.Size()
+			require.NoError(t, err)
+			require.NotZero(t, cdmSize)
+			// Expected size should take into account block size + WAL size + Head
+			// chunks size
+			expSize := blockSize + walSize + cdmSize
+			actSize, err := fileutil.DirSize(db.Dir())
+			require.NoError(t, err)
+			require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
+
+			// Create a WAL checkpoint, and compare sizes.
+			first, last, err := wlog.Segments(db.Head().wal.Dir())
+			require.NoError(t, err)
+			_, err = wlog.Checkpoint(promslog.NewNopLogger(), db.Head().wal, first, last-1, func(chunks.HeadSeriesRef) bool { return false }, 0, enableStStorage)
+			require.NoError(t, err)
+			blockSize = int64(prom_testutil.ToFloat64(db.metrics.blocksBytes)) // Use the actual internal metrics.
+			walSize, err = db.Head().wal.Size()
+			require.NoError(t, err)
+			cdmSize, err = db.Head().chunkDiskMapper.Size()
+			require.NoError(t, err)
+			require.NotZero(t, cdmSize)
+			expSize = blockSize + walSize + cdmSize
+			actSize, err = fileutil.DirSize(db.Dir())
+			require.NoError(t, err)
+			require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
+
+			// Truncate Chunk Disk Mapper and compare sizes.
+			require.NoError(t, db.Head().chunkDiskMapper.Truncate(900))
+			cdmSize, err = db.Head().chunkDiskMapper.Size()
+			require.NoError(t, err)
+			require.NotZero(t, cdmSize)
+			expSize = blockSize + walSize + cdmSize
+			actSize, err = fileutil.DirSize(db.Dir())
+			require.NoError(t, err)
+			require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
+
+			// Add some out of order samples to check the size of WBL.
+			headApp = db.Head().Appender(context.Background())
+			for ts := int64(750); ts < 800; ts++ {
+				_, err := headApp.Append(0, aSeries, ts, float64(ts))
 				require.NoError(t, err)
 			}
-			require.NoError(t, it.Err())
-		}
+			require.NoError(t, headApp.Commit())
+
+			walSize, err = db.Head().wal.Size()
+			require.NoError(t, err)
+			wblSize, err := db.Head().wbl.Size()
+			require.NoError(t, err)
+			require.NotZero(t, wblSize)
+			cdmSize, err = db.Head().chunkDiskMapper.Size()
+			require.NoError(t, err)
+			expSize = blockSize + walSize + wblSize + cdmSize
+			actSize, err = fileutil.DirSize(db.Dir())
+			require.NoError(t, err)
+			require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
+
+			// Decrease the max bytes limit so that a delete is triggered.
+			// Check total size, total count and check that the oldest block was deleted.
+			firstBlockSize := db.Blocks()[0].Size()
+			sizeLimit := actSize - firstBlockSize
+			db.opts.MaxBytes = sizeLimit          // Set the new db size limit one block smaller that the actual size.
+			require.NoError(t, db.reloadBlocks()) // Reload the db to register the new db size.
+
+			expBlocks := blocks[1:]
+			actBlocks := db.Blocks()
+			blockSize = int64(prom_testutil.ToFloat64(db.metrics.blocksBytes))
+			walSize, err = db.Head().wal.Size()
+			require.NoError(t, err)
+			cdmSize, err = db.Head().chunkDiskMapper.Size()
+			require.NoError(t, err)
+			require.NotZero(t, cdmSize)
+			// Expected size should take into account block size + WAL size + WBL size
+			expSize = blockSize + walSize + wblSize + cdmSize
+			actRetentionCount := int(prom_testutil.ToFloat64(db.metrics.sizeRetentionCount))
+			actSize, err = fileutil.DirSize(db.Dir())
+			require.NoError(t, err)
+
+			require.Equal(t, 1, actRetentionCount, "metric retention count mismatch")
+			require.Equal(t, expSize, actSize, "metric db size doesn't match actual disk size")
+			require.LessOrEqual(t, expSize, sizeLimit, "actual size (%v) is expected to be less than or equal to limit (%v)", expSize, sizeLimit)
+			require.Len(t, actBlocks, len(blocks)-1, "new block count should be decreased from:%v to:%v", len(blocks), len(blocks)-1)
+			require.Equal(t, expBlocks[0].MaxTime, actBlocks[0].meta.MaxTime, "maxT mismatch of the first block")
+			require.Equal(t, expBlocks[len(expBlocks)-1].MaxTime, actBlocks[len(actBlocks)-1].meta.MaxTime, "maxT mismatch of the last block")
+		})
 	}
-	require.NoError(t, headApp.Commit())
-	db.Head().mmapHeadChunks()
-
-	require.Eventually(t, func() bool {
-		return db.Head().chunkDiskMapper.IsQueueEmpty()
-	}, 2*time.Second, 100*time.Millisecond)
-
-	// Test that registered size matches the actual disk size.
-	require.NoError(t, db.reloadBlocks())                               // Reload the db to register the new db size.
-	require.Len(t, db.Blocks(), len(blocks))                            // Ensure all blocks are registered.
-	blockSize := int64(prom_testutil.ToFloat64(db.metrics.blocksBytes)) // Use the actual internal metrics.
-	walSize, err := db.Head().wal.Size()
-	require.NoError(t, err)
-	cdmSize, err := db.Head().chunkDiskMapper.Size()
-	require.NoError(t, err)
-	require.NotZero(t, cdmSize)
-	// Expected size should take into account block size + WAL size + Head
-	// chunks size
-	expSize := blockSize + walSize + cdmSize
-	actSize, err := fileutil.DirSize(db.Dir())
-	require.NoError(t, err)
-	require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
-
-	// Create a WAL checkpoint, and compare sizes.
-	first, last, err := wlog.Segments(db.Head().wal.Dir())
-	require.NoError(t, err)
-	_, err = wlog.Checkpoint(promslog.NewNopLogger(), db.Head().wal, first, last-1, func(chunks.HeadSeriesRef) bool { return false }, 0, db.Head().opts.EnableSTStorage)
-	require.NoError(t, err)
-	blockSize = int64(prom_testutil.ToFloat64(db.metrics.blocksBytes)) // Use the actual internal metrics.
-	walSize, err = db.Head().wal.Size()
-	require.NoError(t, err)
-	cdmSize, err = db.Head().chunkDiskMapper.Size()
-	require.NoError(t, err)
-	require.NotZero(t, cdmSize)
-	expSize = blockSize + walSize + cdmSize
-	actSize, err = fileutil.DirSize(db.Dir())
-	require.NoError(t, err)
-	require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
-
-	// Truncate Chunk Disk Mapper and compare sizes.
-	require.NoError(t, db.Head().chunkDiskMapper.Truncate(900))
-	cdmSize, err = db.Head().chunkDiskMapper.Size()
-	require.NoError(t, err)
-	require.NotZero(t, cdmSize)
-	expSize = blockSize + walSize + cdmSize
-	actSize, err = fileutil.DirSize(db.Dir())
-	require.NoError(t, err)
-	require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
-
-	// Add some out of order samples to check the size of WBL.
-	headApp = db.Head().Appender(context.Background())
-	for ts := int64(750); ts < 800; ts++ {
-		_, err := headApp.Append(0, aSeries, ts, float64(ts))
-		require.NoError(t, err)
-	}
-	require.NoError(t, headApp.Commit())
-
-	walSize, err = db.Head().wal.Size()
-	require.NoError(t, err)
-	wblSize, err := db.Head().wbl.Size()
-	require.NoError(t, err)
-	require.NotZero(t, wblSize)
-	cdmSize, err = db.Head().chunkDiskMapper.Size()
-	require.NoError(t, err)
-	expSize = blockSize + walSize + wblSize + cdmSize
-	actSize, err = fileutil.DirSize(db.Dir())
-	require.NoError(t, err)
-	require.Equal(t, expSize, actSize, "registered size doesn't match actual disk size")
-
-	// Decrease the max bytes limit so that a delete is triggered.
-	// Check total size, total count and check that the oldest block was deleted.
-	firstBlockSize := db.Blocks()[0].Size()
-	sizeLimit := actSize - firstBlockSize
-	db.opts.MaxBytes = sizeLimit          // Set the new db size limit one block smaller that the actual size.
-	require.NoError(t, db.reloadBlocks()) // Reload the db to register the new db size.
-
-	expBlocks := blocks[1:]
-	actBlocks := db.Blocks()
-	blockSize = int64(prom_testutil.ToFloat64(db.metrics.blocksBytes))
-	walSize, err = db.Head().wal.Size()
-	require.NoError(t, err)
-	cdmSize, err = db.Head().chunkDiskMapper.Size()
-	require.NoError(t, err)
-	require.NotZero(t, cdmSize)
-	// Expected size should take into account block size + WAL size + WBL size
-	expSize = blockSize + walSize + wblSize + cdmSize
-	actRetentionCount := int(prom_testutil.ToFloat64(db.metrics.sizeRetentionCount))
-	actSize, err = fileutil.DirSize(db.Dir())
-	require.NoError(t, err)
-
-	require.Equal(t, 1, actRetentionCount, "metric retention count mismatch")
-	require.Equal(t, expSize, actSize, "metric db size doesn't match actual disk size")
-	require.LessOrEqual(t, expSize, sizeLimit, "actual size (%v) is expected to be less than or equal to limit (%v)", expSize, sizeLimit)
-	require.Len(t, actBlocks, len(blocks)-1, "new block count should be decreased from:%v to:%v", len(blocks), len(blocks)-1)
-	require.Equal(t, expBlocks[0].MaxTime, actBlocks[0].meta.MaxTime, "maxT mismatch of the first block")
-	require.Equal(t, expBlocks[len(expBlocks)-1].MaxTime, actBlocks[len(actBlocks)-1].meta.MaxTime, "maxT mismatch of the last block")
 }
 
 func TestSizeRetentionMetric(t *testing.T) {

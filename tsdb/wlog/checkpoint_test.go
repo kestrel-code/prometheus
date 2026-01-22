@@ -173,7 +173,7 @@ func TestCheckpoint(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				enc := record.Encoder{EnableSTStorage: enableStStorage}
@@ -387,37 +387,39 @@ func TestCheckpoint(t *testing.T) {
 
 func TestCheckpointNoTmpFolderAfterError(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
-		// Create a new wlog with invalid data.
-		dir := t.TempDir()
-		w, err := NewSize(nil, nil, dir, 64*1024, compression.None)
-		require.NoError(t, err)
-		enc := record.Encoder{EnableSTStorage: enableStStorage}
-		require.NoError(t, w.Log(enc.Series([]record.RefSeries{
-			{Ref: 0, Labels: labels.FromStrings("a", "b", "c", "2")},
-		}, nil)))
-		require.NoError(t, w.Close())
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			// Create a new wlog with invalid data.
+			dir := t.TempDir()
+			w, err := NewSize(nil, nil, dir, 64*1024, compression.None)
+			require.NoError(t, err)
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			require.NoError(t, w.Log(enc.Series([]record.RefSeries{
+				{Ref: 0, Labels: labels.FromStrings("a", "b", "c", "2")},
+			}, nil)))
+			require.NoError(t, w.Close())
 
-		// Corrupt data.
-		f, err := os.OpenFile(filepath.Join(w.Dir(), "00000000"), os.O_WRONLY, 0o666)
-		require.NoError(t, err)
-		_, err = f.WriteAt([]byte{42}, 1)
-		require.NoError(t, err)
-		require.NoError(t, f.Close())
+			// Corrupt data.
+			f, err := os.OpenFile(filepath.Join(w.Dir(), "00000000"), os.O_WRONLY, 0o666)
+			require.NoError(t, err)
+			_, err = f.WriteAt([]byte{42}, 1)
+			require.NoError(t, err)
+			require.NoError(t, f.Close())
 
-		// Run the checkpoint and since the wlog contains corrupt data this should return an error.
-		_, err = Checkpoint(promslog.NewNopLogger(), w, 0, 1, nil, 0, enableStStorage)
-		require.Error(t, err)
+			// Run the checkpoint and since the wlog contains corrupt data this should return an error.
+			_, err = Checkpoint(promslog.NewNopLogger(), w, 0, 1, nil, 0, enableStStorage)
+			require.Error(t, err)
 
-		// Walk the wlog dir to make sure there are no tmp folder left behind after the error.
-		err = filepath.Walk(w.Dir(), func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return fmt.Errorf("access err %q: %w", path, err)
-			}
-			if info.IsDir() && strings.HasSuffix(info.Name(), ".tmp") {
-				return fmt.Errorf("wlog dir contains temporary folder:%s", info.Name())
-			}
-			return nil
+			// Walk the wlog dir to make sure there are no tmp folder left behind after the error.
+			err = filepath.Walk(w.Dir(), func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return fmt.Errorf("access err %q: %w", path, err)
+				}
+				if info.IsDir() && strings.HasSuffix(info.Name(), ".tmp") {
+					return fmt.Errorf("wlog dir contains temporary folder:%s", info.Name())
+				}
+				return nil
+			})
+			require.NoError(t, err)
 		})
-		require.NoError(t, err)
 	}
 }

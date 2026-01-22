@@ -145,7 +145,7 @@ func TestTailSamples(t *testing.T) {
 	const histogramsCount = 50
 	for _, compress := range compression.Types() {
 		for _, enableStStorage := range []bool{false, true} {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				now := time.Now()
 
 				dir := t.TempDir()
@@ -295,7 +295,7 @@ func TestReadToEndNoCheckpoint(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 				wdir := path.Join(dir, "wal")
 				err := os.Mkdir(wdir, 0o777)
@@ -365,7 +365,7 @@ func TestReadToEndWithCheckpoint(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				wdir := path.Join(dir, "wal")
@@ -455,7 +455,7 @@ func TestReadCheckpoint(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				wdir := path.Join(dir, "wal")
@@ -530,7 +530,7 @@ func TestReadCheckpointMultipleSegments(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				wdir := path.Join(dir, "wal")
@@ -610,7 +610,7 @@ func TestCheckpointSeriesReset(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, tc := range testCases {
-			t.Run(fmt.Sprintf("compress=%s", tc.compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", tc.compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 				dir = path.Join(dir, tc.compress)
 				err := os.Mkdir(dir, 0o777)
@@ -698,7 +698,7 @@ func TestRun_StartupTime(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				wdir := path.Join(dir, "wal")
@@ -793,7 +793,7 @@ func TestRun_AvoidNotifyWhenBehind(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range compression.Types() {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				dir := t.TempDir()
 
 				wdir := path.Join(dir, "wal")

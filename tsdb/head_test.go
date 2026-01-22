@@ -254,8 +254,8 @@ func BenchmarkLoadWLs(b *testing.B) {
 	// Rough estimates of most common % of samples that have an exemplar for each scrape.
 	exemplarsPercentages := []float64{0, 0.5, 1, 5}
 	lastExemplarsPerSeries := -1
-	for _, c := range cases {
-		for _, enableStStorage := range []bool{false, true} {
+	for _, enableStStorage := range []bool{false, true} {
+		for _, c := range cases {
 			missingSeriesPercentages := []float64{0, 0.1}
 			for _, missingSeriesPct := range missingSeriesPercentages {
 				for _, p := range exemplarsPercentages {
@@ -266,7 +266,7 @@ func BenchmarkLoadWLs(b *testing.B) {
 						continue
 					}
 					lastExemplarsPerSeries = exemplarsPerSeries
-					b.Run(fmt.Sprintf("batches=%d,seriesPerBatch=%d,samplesPerSeries=%d,exemplarsPerSeries=%d,mmappedChunkT=%d,oooSeriesPct=%.3f,oooSamplesPct=%.3f,oooCapMax=%d,missingSeriesPct=%.3f", c.batches, c.seriesPerBatch, c.samplesPerSeries, exemplarsPerSeries, c.mmappedChunkT, c.oooSeriesPct, c.oooSamplesPct, c.oooCapMax, missingSeriesPct),
+					b.Run(fmt.Sprintf("batches=%d,seriesPerBatch=%d,samplesPerSeries=%d,exemplarsPerSeries=%d,mmappedChunkT=%d,oooSeriesPct=%.3f,oooSamplesPct=%.3f,oooCapMax=%d,missingSeriesPct=%.3f,stStorage=%v", c.batches, c.seriesPerBatch, c.samplesPerSeries, exemplarsPerSeries, c.mmappedChunkT, c.oooSeriesPct, c.oooSamplesPct, c.oooCapMax, missingSeriesPct, enableStStorage),
 						func(b *testing.B) {
 							dir := b.TempDir()
 
@@ -666,7 +666,7 @@ func TestHead_HighConcurrencyReadAndWrite(t *testing.T) {
 func TestHead_ReadWAL(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, compress := range []compression.Type{compression.None, compression.Snappy, compression.Zstd} {
-			t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+			t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 				entries := []any{
 					[]record.RefSeries{
 						{Ref: 10, Labels: labels.FromStrings("a", "1")},
@@ -1056,7 +1056,7 @@ func TestHead_WALCheckpointMultiRef(t *testing.T) {
 
 	for _, enableStStorage := range []bool{false, true} {
 		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
+			t.Run(tc.name+",stStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
 				h, w := newTestHead(t, 1000, compression.None, false)
 				populateTestWL(t, w, tc.walEntries, nil, enableStStorage)
 				first, _, err := wlog.Segments(w.Dir())
@@ -1643,7 +1643,7 @@ func TestMemSeries_truncateChunks_scenarios(t *testing.T) {
 func TestHeadDeleteSeriesWithoutSamples(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 	for _, compress := range []compression.Type{compression.None, compression.Snappy, compression.Zstd} {
-		t.Run(fmt.Sprintf("compress=%s", compress), func(t *testing.T) {
+		t.Run(fmt.Sprintf("compress=%s,stStorage=%v", compress, enableStStorage), func(t *testing.T) {
 			entries := []any{
 				[]record.RefSeries{
 					{Ref: 10, Labels: labels.FromStrings("a", "1")},
@@ -2560,7 +2560,7 @@ func TestWalRepair_DecodingError(t *testing.T) {
 			},
 		} {
 			for _, compress := range []compression.Type{compression.None, compression.Snappy, compression.Zstd} {
-				t.Run(fmt.Sprintf("%s,compress=%s", name, compress), func(t *testing.T) {
+				t.Run(fmt.Sprintf("%s,compress=%s,stStorage=%v", name, compress, enableStStorage), func(t *testing.T) {
 					dir := t.TempDir()
 
 					// Fill the wal and corrupt it.
@@ -2624,73 +2624,75 @@ func TestWalRepair_DecodingError(t *testing.T) {
 // when decoding a record.
 func TestWblRepair_DecodingError(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
-		enc := record.Encoder{EnableSTStorage: enableStStorage}
-		corrFunc := func(rec []byte) []byte {
-			return rec[:3]
-		}
-		rec := enc.Samples([]record.RefSample{{Ref: 0, T: 99, V: 1}}, []byte{})
-		totalRecs := 9
-		expRecs := 5
-		dir := t.TempDir()
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			enc := record.Encoder{EnableSTStorage: enableStStorage}
+			corrFunc := func(rec []byte) []byte {
+				return rec[:3]
+			}
+			rec := enc.Samples([]record.RefSample{{Ref: 0, T: 99, V: 1}}, []byte{})
+			totalRecs := 9
+			expRecs := 5
+			dir := t.TempDir()
 
-		// Fill the wbl and corrupt it.
-		{
-			wal, err := wlog.New(nil, nil, filepath.Join(dir, "wal"), compression.None)
-			require.NoError(t, err)
-			wbl, err := wlog.New(nil, nil, filepath.Join(dir, "wbl"), compression.None)
-			require.NoError(t, err)
+			// Fill the wbl and corrupt it.
+			{
+				wal, err := wlog.New(nil, nil, filepath.Join(dir, "wal"), compression.None)
+				require.NoError(t, err)
+				wbl, err := wlog.New(nil, nil, filepath.Join(dir, "wbl"), compression.None)
+				require.NoError(t, err)
 
-			for i := 1; i <= totalRecs; i++ {
-				// At this point insert a corrupted record.
-				if i-1 == expRecs {
-					require.NoError(t, wbl.Log(corrFunc(rec)))
-					continue
+				for i := 1; i <= totalRecs; i++ {
+					// At this point insert a corrupted record.
+					if i-1 == expRecs {
+						require.NoError(t, wbl.Log(corrFunc(rec)))
+						continue
+					}
+					require.NoError(t, wbl.Log(rec))
 				}
-				require.NoError(t, wbl.Log(rec))
+
+				opts := DefaultHeadOptions()
+				opts.ChunkRange = 1
+				opts.ChunkDirRoot = wal.Dir()
+				opts.OutOfOrderCapMax.Store(30)
+				opts.OutOfOrderTimeWindow.Store(1000 * time.Minute.Milliseconds())
+				h, err := NewHead(nil, nil, wal, wbl, opts, nil)
+				require.NoError(t, err)
+				require.Equal(t, 0.0, prom_testutil.ToFloat64(h.metrics.walCorruptionsTotal))
+				initErr := h.Init(math.MinInt64)
+
+				var elb *errLoadWbl
+				require.ErrorAs(t, initErr, &elb) // Wbl errors are wrapped into errLoadWbl, make sure we can unwrap it.
+
+				var cerr *wlog.CorruptionErr
+				require.ErrorAs(t, initErr, &cerr, "reading the wal didn't return corruption error")
+				require.NoError(t, h.Close()) // Head will close the wal as well.
 			}
 
-			opts := DefaultHeadOptions()
-			opts.ChunkRange = 1
-			opts.ChunkDirRoot = wal.Dir()
-			opts.OutOfOrderCapMax.Store(30)
-			opts.OutOfOrderTimeWindow.Store(1000 * time.Minute.Milliseconds())
-			h, err := NewHead(nil, nil, wal, wbl, opts, nil)
-			require.NoError(t, err)
-			require.Equal(t, 0.0, prom_testutil.ToFloat64(h.metrics.walCorruptionsTotal))
-			initErr := h.Init(math.MinInt64)
-
-			var elb *errLoadWbl
-			require.ErrorAs(t, initErr, &elb) // Wbl errors are wrapped into errLoadWbl, make sure we can unwrap it.
-
-			var cerr *wlog.CorruptionErr
-			require.ErrorAs(t, initErr, &cerr, "reading the wal didn't return corruption error")
-			require.NoError(t, h.Close()) // Head will close the wal as well.
-		}
-
-		// Open the db to trigger a repair.
-		{
-			db, err := Open(dir, nil, nil, DefaultOptions(), nil)
-			require.NoError(t, err)
-			defer func() {
-				require.NoError(t, db.Close())
-			}()
-			require.Equal(t, 1.0, prom_testutil.ToFloat64(db.head.metrics.walCorruptionsTotal))
-		}
-
-		// Read the wbl content after the repair.
-		{
-			sr, err := wlog.NewSegmentsReader(filepath.Join(dir, "wbl"))
-			require.NoError(t, err)
-			defer sr.Close()
-			r := wlog.NewReader(sr)
-
-			var actRec int
-			for r.Next() {
-				actRec++
+			// Open the db to trigger a repair.
+			{
+				db, err := Open(dir, nil, nil, DefaultOptions(), nil)
+				require.NoError(t, err)
+				defer func() {
+					require.NoError(t, db.Close())
+				}()
+				require.Equal(t, 1.0, prom_testutil.ToFloat64(db.head.metrics.walCorruptionsTotal))
 			}
-			require.NoError(t, r.Err())
-			require.Equal(t, expRecs, actRec, "Wrong number of intact records")
-		}
+
+			// Read the wbl content after the repair.
+			{
+				sr, err := wlog.NewSegmentsReader(filepath.Join(dir, "wbl"))
+				require.NoError(t, err)
+				defer sr.Close()
+				r := wlog.NewReader(sr)
+
+				var actRec int
+				for r.Next() {
+					actRec++
+				}
+				require.NoError(t, r.Err())
+				require.Equal(t, expRecs, actRec, "Wrong number of intact records")
+			}
+		})
 	}
 }
 
@@ -4416,184 +4418,186 @@ func TestChunkSnapshot(t *testing.T) {
 	}
 
 	for _, enableStStorage := range []bool{false, true} {
-		{ // Initial data that goes into snapshot.
-			// Add some initial samples with >=1 m-map chunk.
-			app := head.Appender(context.Background())
-			for i := 1; i <= numSeries; i++ {
-				lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
-				lblStr := lbls.String()
-				lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
-				lblsHistStr := lblsHist.String()
-				lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
-				lblsFloatHistStr := lblsFloatHist.String()
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			{ // Initial data that goes into snapshot.
+				// Add some initial samples with >=1 m-map chunk.
+				app := head.Appender(context.Background())
+				for i := 1; i <= numSeries; i++ {
+					lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
+					lblStr := lbls.String()
+					lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
+					lblsHistStr := lblsHist.String()
+					lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
+					lblsFloatHistStr := lblsFloatHist.String()
 
-			// 240 samples should m-map at least 1 chunk.
-			for ts := int64(1); ts <= 240; ts++ {
-				val := rand.Float64()
-				expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
-				ref, err := app.Append(0, lbls, ts, val)
-				require.NoError(t, err)
+				// 240 samples should m-map at least 1 chunk.
+				for ts := int64(1); ts <= 240; ts++ {
+					val := rand.Float64()
+					expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
+					ref, err := app.Append(0, lbls, ts, val)
+					require.NoError(t, err)
 
-				hist := histograms[int(ts)]
-				expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
-				_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
-				require.NoError(t, err)
+					hist := histograms[int(ts)]
+					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
+					_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
+					require.NoError(t, err)
 
-				floatHist := floatHistogram[int(ts)]
-				expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
-				_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
-				require.NoError(t, err)
+					floatHist := floatHistogram[int(ts)]
+					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
+					_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
+					require.NoError(t, err)
 
-					// Add an exemplar and to create multiple WAL records.
-					if ts%10 == 0 {
-						addExemplar(app, ref, lbls, ts)
-						require.NoError(t, app.Commit())
-						app = head.Appender(context.Background())
+						// Add an exemplar and to create multiple WAL records.
+						if ts%10 == 0 {
+							addExemplar(app, ref, lbls, ts)
+							require.NoError(t, app.Commit())
+							app = head.Appender(context.Background())
+						}
 					}
 				}
-			}
-			require.NoError(t, app.Commit())
+				require.NoError(t, app.Commit())
 
-			// Add some tombstones.
-			enc := record.Encoder{EnableSTStorage: enableStStorage}
-			for i := 1; i <= numSeries; i++ {
-				ref := storage.SeriesRef(i)
-				itvs := tombstones.Intervals{
-					{Mint: 1234, Maxt: 2345},
-					{Mint: 3456, Maxt: 4567},
-				}
-				for _, itv := range itvs {
-					expTombstones[ref].Add(itv)
-				}
-				head.tombstones.AddInterval(ref, itvs...)
-				err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
-					{Ref: ref, Intervals: itvs},
-				}, nil))
-				require.NoError(t, err)
-			}
-		}
-
-		// These references should be the ones used for the snapshot.
-		wlast, woffset, err = head.wal.LastSegmentAndOffset()
-		require.NoError(t, err)
-		if woffset != 0 && woffset < 32*1024 {
-			// The page is always filled before taking the snapshot.
-			woffset = 32 * 1024
-		}
-
-		{
-			// Creating snapshot and verifying it.
-			head.opts.EnableMemorySnapshotOnShutdown = true
-			closeHeadAndCheckSnapshot() // This will create a snapshot.
-
-			// Test the replay of snapshot.
-			openHeadAndCheckReplay()
-		}
-
-		{ // Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
-			// Add more samples.
-			app := head.Appender(context.Background())
-			for i := 1; i <= numSeries; i++ {
-				lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
-				lblStr := lbls.String()
-				lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
-				lblsHistStr := lblsHist.String()
-				lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
-				lblsFloatHistStr := lblsFloatHist.String()
-
-			// 240 samples should m-map at least 1 chunk.
-			for ts := int64(241); ts <= 480; ts++ {
-				val := rand.Float64()
-				expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
-				ref, err := app.Append(0, lbls, ts, val)
-				require.NoError(t, err)
-
-				hist := histograms[int(ts)]
-				expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
-				_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
-				require.NoError(t, err)
-
-				floatHist := floatHistogram[int(ts)]
-				expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
-				_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
-				require.NoError(t, err)
-
-					// Add an exemplar and to create multiple WAL records.
-					if ts%10 == 0 {
-						addExemplar(app, ref, lbls, ts)
-						require.NoError(t, app.Commit())
-						app = head.Appender(context.Background())
+				// Add some tombstones.
+				enc := record.Encoder{EnableSTStorage: enableStStorage}
+				for i := 1; i <= numSeries; i++ {
+					ref := storage.SeriesRef(i)
+					itvs := tombstones.Intervals{
+						{Mint: 1234, Maxt: 2345},
+						{Mint: 3456, Maxt: 4567},
 					}
+					for _, itv := range itvs {
+						expTombstones[ref].Add(itv)
+					}
+					head.tombstones.AddInterval(ref, itvs...)
+					err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
+						{Ref: ref, Intervals: itvs},
+					}, nil))
+					require.NoError(t, err)
 				}
 			}
-			require.NoError(t, app.Commit())
 
-			// Add more tombstones.
-			enc := record.Encoder{EnableSTStorage: enableStStorage}
-			for i := 1; i <= numSeries; i++ {
-				ref := storage.SeriesRef(i)
-				itvs := tombstones.Intervals{
-					{Mint: 12345, Maxt: 23456},
-					{Mint: 34567, Maxt: 45678},
-				}
-				for _, itv := range itvs {
-					expTombstones[ref].Add(itv)
-				}
-				head.tombstones.AddInterval(ref, itvs...)
-				err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
-					{Ref: ref, Intervals: itvs},
-				}, nil))
-				require.NoError(t, err)
-			}
-		}
-		{
-			// Close Head and verify that new snapshot was not created.
-			head.opts.EnableMemorySnapshotOnShutdown = false
-			closeHeadAndCheckSnapshot() // This should not create a snapshot.
-
-			// Test the replay of snapshot, m-map chunks, and WAL.
-			head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
-			openHeadAndCheckReplay()
-		}
-
-		// Creating another snapshot should delete the older snapshot and replay still works fine.
-		wlast, woffset, err = head.wal.LastSegmentAndOffset()
-		require.NoError(t, err)
-		if woffset != 0 && woffset < 32*1024 {
-			// The page is always filled before taking the snapshot.
-			woffset = 32 * 1024
-		}
-
-		{
-			// Close Head and verify that new snapshot was created.
-			closeHeadAndCheckSnapshot()
-
-			// Verify that there is only 1 snapshot.
-			files, err := os.ReadDir(head.opts.ChunkDirRoot)
+			// These references should be the ones used for the snapshot.
+			wlast, woffset, err = head.wal.LastSegmentAndOffset()
 			require.NoError(t, err)
-			snapshots := 0
-			for i := len(files) - 1; i >= 0; i-- {
-				fi := files[i]
-				if strings.HasPrefix(fi.Name(), chunkSnapshotPrefix) {
-					snapshots++
-					require.Equal(t, chunkSnapshotDir(wlast, woffset), fi.Name())
+			if woffset != 0 && woffset < 32*1024 {
+				// The page is always filled before taking the snapshot.
+				woffset = 32 * 1024
+			}
+
+			{
+				// Creating snapshot and verifying it.
+				head.opts.EnableMemorySnapshotOnShutdown = true
+				closeHeadAndCheckSnapshot() // This will create a snapshot.
+
+				// Test the replay of snapshot.
+				openHeadAndCheckReplay()
+			}
+
+			{ // Additional data to only include in WAL and m-mapped chunks and not snapshot. This mimics having an old snapshot on disk.
+				// Add more samples.
+				app := head.Appender(context.Background())
+				for i := 1; i <= numSeries; i++ {
+					lbls := labels.FromStrings("foo", fmt.Sprintf("bar%d", i))
+					lblStr := lbls.String()
+					lblsHist := labels.FromStrings("hist", fmt.Sprintf("baz%d", i))
+					lblsHistStr := lblsHist.String()
+					lblsFloatHist := labels.FromStrings("floathist", fmt.Sprintf("bat%d", i))
+					lblsFloatHistStr := lblsFloatHist.String()
+
+				// 240 samples should m-map at least 1 chunk.
+				for ts := int64(241); ts <= 480; ts++ {
+					val := rand.Float64()
+					expSeries[lblStr] = append(expSeries[lblStr], sample{0, ts, val, nil, nil})
+					ref, err := app.Append(0, lbls, ts, val)
+					require.NoError(t, err)
+
+					hist := histograms[int(ts)]
+					expHist[lblsHistStr] = append(expHist[lblsHistStr], sample{0, ts, 0, hist, nil})
+					_, err = app.AppendHistogram(0, lblsHist, ts, hist, nil)
+					require.NoError(t, err)
+
+					floatHist := floatHistogram[int(ts)]
+					expFloatHist[lblsFloatHistStr] = append(expFloatHist[lblsFloatHistStr], sample{0, ts, 0, nil, floatHist})
+					_, err = app.AppendHistogram(0, lblsFloatHist, ts, nil, floatHist)
+					require.NoError(t, err)
+
+						// Add an exemplar and to create multiple WAL records.
+						if ts%10 == 0 {
+							addExemplar(app, ref, lbls, ts)
+							require.NoError(t, app.Commit())
+							app = head.Appender(context.Background())
+						}
+					}
+				}
+				require.NoError(t, app.Commit())
+
+				// Add more tombstones.
+				enc := record.Encoder{EnableSTStorage: enableStStorage}
+				for i := 1; i <= numSeries; i++ {
+					ref := storage.SeriesRef(i)
+					itvs := tombstones.Intervals{
+						{Mint: 12345, Maxt: 23456},
+						{Mint: 34567, Maxt: 45678},
+					}
+					for _, itv := range itvs {
+						expTombstones[ref].Add(itv)
+					}
+					head.tombstones.AddInterval(ref, itvs...)
+					err := head.wal.Log(enc.Tombstones([]tombstones.Stone{
+						{Ref: ref, Intervals: itvs},
+					}, nil))
+					require.NoError(t, err)
 				}
 			}
-			require.Equal(t, 1, snapshots)
+			{
+				// Close Head and verify that new snapshot was not created.
+				head.opts.EnableMemorySnapshotOnShutdown = false
+				closeHeadAndCheckSnapshot() // This should not create a snapshot.
 
-			// Test the replay of snapshot.
-			head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+				// Test the replay of snapshot, m-map chunks, and WAL.
+				head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+				openHeadAndCheckReplay()
+			}
 
-			// Disabling exemplars to check that it does not hard fail replay
-			// https://github.com/prometheus/prometheus/issues/9437#issuecomment-933285870.
-			head.opts.EnableExemplarStorage = false
-			head.opts.MaxExemplars.Store(0)
-			expExemplars = expExemplars[:0]
+			// Creating another snapshot should delete the older snapshot and replay still works fine.
+			wlast, woffset, err = head.wal.LastSegmentAndOffset()
+			require.NoError(t, err)
+			if woffset != 0 && woffset < 32*1024 {
+				// The page is always filled before taking the snapshot.
+				woffset = 32 * 1024
+			}
 
-			openHeadAndCheckReplay()
+			{
+				// Close Head and verify that new snapshot was created.
+				closeHeadAndCheckSnapshot()
 
-			require.Equal(t, 0.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
-		}
+				// Verify that there is only 1 snapshot.
+				files, err := os.ReadDir(head.opts.ChunkDirRoot)
+				require.NoError(t, err)
+				snapshots := 0
+				for i := len(files) - 1; i >= 0; i-- {
+					fi := files[i]
+					if strings.HasPrefix(fi.Name(), chunkSnapshotPrefix) {
+						snapshots++
+						require.Equal(t, chunkSnapshotDir(wlast, woffset), fi.Name())
+					}
+				}
+				require.Equal(t, 1, snapshots)
+
+				// Test the replay of snapshot.
+				head.opts.EnableMemorySnapshotOnShutdown = true // Enabled to read from snapshot.
+
+				// Disabling exemplars to check that it does not hard fail replay
+				// https://github.com/prometheus/prometheus/issues/9437#issuecomment-933285870.
+				head.opts.EnableExemplarStorage = false
+				head.opts.MaxExemplars.Store(0)
+				expExemplars = expExemplars[:0]
+
+				openHeadAndCheckReplay()
+
+				require.Equal(t, 0.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
+			}
+		})
 	}
 }
 
@@ -5322,70 +5326,72 @@ func TestAppendingDifferentEncodingToSameSeries(t *testing.T) {
 // Tests https://github.com/prometheus/prometheus/issues/9725.
 func TestChunkSnapshotReplayBug(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
-		dir := t.TempDir()
-		wal, err := wlog.NewSize(nil, nil, filepath.Join(dir, "wal"), 32768, compression.Snappy)
-		require.NoError(t, err)
+		t.Run("enableStStorage="+strconv.FormatBool(enableStStorage), func(t *testing.T) {
+			dir := t.TempDir()
+			wal, err := wlog.NewSize(nil, nil, filepath.Join(dir, "wal"), 32768, compression.Snappy)
+			require.NoError(t, err)
 
-		// Write few series records and samples such that the series references are not in order in the WAL
-		// for status_code="200".
-		var buf []byte
-		for i := 1; i <= 1000; i++ {
-			var ref chunks.HeadSeriesRef
-			if i <= 500 {
-				ref = chunks.HeadSeriesRef(i * 100)
-			} else {
-				ref = chunks.HeadSeriesRef((i - 500) * 50)
+			// Write few series records and samples such that the series references are not in order in the WAL
+			// for status_code="200".
+			var buf []byte
+			for i := 1; i <= 1000; i++ {
+				var ref chunks.HeadSeriesRef
+				if i <= 500 {
+					ref = chunks.HeadSeriesRef(i * 100)
+				} else {
+					ref = chunks.HeadSeriesRef((i - 500) * 50)
+				}
+				seriesRec := record.RefSeries{
+					Ref: ref,
+					Labels: labels.FromStrings(
+						"__name__", "request_duration",
+						"status_code", "200",
+						"foo", fmt.Sprintf("baz%d", rand.Int()),
+					),
+				}
+				// Add a sample so that the series is not garbage collected.
+				samplesRec := record.RefSample{Ref: ref, T: 1000, V: 1000}
+				enc := record.Encoder{EnableSTStorage: enableStStorage}
+
+				rec := enc.Series([]record.RefSeries{seriesRec}, buf)
+				buf = rec[:0]
+				require.NoError(t, wal.Log(rec))
+				rec = enc.Samples([]record.RefSample{samplesRec}, buf)
+				buf = rec[:0]
+				require.NoError(t, wal.Log(rec))
 			}
-			seriesRec := record.RefSeries{
-				Ref: ref,
-				Labels: labels.FromStrings(
-					"__name__", "request_duration",
-					"status_code", "200",
-					"foo", fmt.Sprintf("baz%d", rand.Int()),
-				),
-			}
-			// Add a sample so that the series is not garbage collected.
-			samplesRec := record.RefSample{Ref: ref, T: 1000, V: 1000}
-			enc := record.Encoder{EnableSTStorage: enableStStorage}
 
-			rec := enc.Series([]record.RefSeries{seriesRec}, buf)
-			buf = rec[:0]
-			require.NoError(t, wal.Log(rec))
-			rec = enc.Samples([]record.RefSample{samplesRec}, buf)
-			buf = rec[:0]
-			require.NoError(t, wal.Log(rec))
-		}
+			// Write a corrupt snapshot to fail the replay on startup.
+			snapshotName := chunkSnapshotDir(0, 100)
+			cpdir := filepath.Join(dir, snapshotName)
+			require.NoError(t, os.MkdirAll(cpdir, 0o777))
 
-		// Write a corrupt snapshot to fail the replay on startup.
-		snapshotName := chunkSnapshotDir(0, 100)
-		cpdir := filepath.Join(dir, snapshotName)
-		require.NoError(t, os.MkdirAll(cpdir, 0o777))
+			err = os.WriteFile(filepath.Join(cpdir, "00000000"), []byte{1, 5, 3, 5, 6, 7, 4, 2, 2}, 0o777)
+			require.NoError(t, err)
 
-		err = os.WriteFile(filepath.Join(cpdir, "00000000"), []byte{1, 5, 3, 5, 6, 7, 4, 2, 2}, 0o777)
-		require.NoError(t, err)
+			opts := DefaultHeadOptions()
+			opts.ChunkDirRoot = dir
+			opts.EnableMemorySnapshotOnShutdown = true
+			head, err := NewHead(nil, nil, wal, nil, opts, nil)
+			require.NoError(t, err)
+			require.NoError(t, head.Init(math.MinInt64))
+			defer func() {
+				require.NoError(t, head.Close())
+			}()
 
-		opts := DefaultHeadOptions()
-		opts.ChunkDirRoot = dir
-		opts.EnableMemorySnapshotOnShutdown = true
-		head, err := NewHead(nil, nil, wal, nil, opts, nil)
-		require.NoError(t, err)
-		require.NoError(t, head.Init(math.MinInt64))
-		defer func() {
-			require.NoError(t, head.Close())
-		}()
+			// Snapshot replay should error out.
+			require.Equal(t, 1.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
 
-		// Snapshot replay should error out.
-		require.Equal(t, 1.0, prom_testutil.ToFloat64(head.metrics.snapshotReplayErrorTotal))
-
-		// Querying `request_duration{status_code!="200"}` should return no series since all of
-		// them have status_code="200".
-		q, err := NewBlockQuerier(head, math.MinInt64, math.MaxInt64)
-		require.NoError(t, err)
-		series := query(t, q,
-			labels.MustNewMatcher(labels.MatchEqual, "__name__", "request_duration"),
-			labels.MustNewMatcher(labels.MatchNotEqual, "status_code", "200"),
-		)
-		require.Empty(t, series, "there should be no series found")
+			// Querying `request_duration{status_code!="200"}` should return no series since all of
+			// them have status_code="200".
+			q, err := NewBlockQuerier(head, math.MinInt64, math.MaxInt64)
+			require.NoError(t, err)
+			series := query(t, q,
+				labels.MustNewMatcher(labels.MatchEqual, "__name__", "request_duration"),
+				labels.MustNewMatcher(labels.MatchNotEqual, "status_code", "200"),
+			)
+			require.Empty(t, series, "there should be no series found")
+		})
 	}
 }
 

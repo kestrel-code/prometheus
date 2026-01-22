@@ -971,7 +971,7 @@ func TestWALReplayRaceOnSamplesLoggedBeforeSeries_AppendV2(t *testing.T) {
 	for _, enableStStorage := range []bool{false, true} {
 		for _, numSamplesAfterSeriesCreation := range []int{1, 1000} {
 			for run := 1; run <= numRuns; run++ {
-				t.Run(fmt.Sprintf("samples after series creation = %d, run = %d", numSamplesAfterSeriesCreation, run), func(t *testing.T) {
+				t.Run(fmt.Sprintf("samples after series creation = %d, run = %d, stStorage = %v", numSamplesAfterSeriesCreation, run, enableStStorage), func(t *testing.T) {
 					testWALReplayRaceOnSamplesLoggedBeforeSeriesAppendV2(t, numSamplesBeforeSeriesCreation, numSamplesAfterSeriesCreation, enableStStorage)
 				})
 			}
